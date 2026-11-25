@@ -1,0 +1,1944 @@
+/* ============================================================================
+ * THEME TOKENS — dark surrounding (background, nav, god-mode views)
+ * Layered near-black surface ladder (bg < panel < card < elevated), one accent,
+ * a tight radius scale, and a text ramp. These drive the page background, the
+ * nav, and the god-mode sections. The mission cards keep their own design
+ * (colored status frame + light inner panel) and do NOT consume these surfaces.
+ * ==========================================================================*/
+
+:root {
+  /* layered near-black surface ladder */
+  --bg:       #000000;   /* page (dot-matrix sits here) */
+  --panel:    #0c0d10;   /* god-mode panels */
+  --card:     #121316;   /* god-mode card surfaces */
+  --elevated: #17181c;   /* boxes inside god-mode panels */
+
+  /* text ramp */
+  --text:  #f4f5f7;      /* primary */
+  --muted: #8b8f98;      /* secondary labels */
+  --faint: #5a5e66;      /* tertiary / notes */
+
+  /* one accent + hairlines */
+  --accent: #5ec8ff;     /* focus, active tab, links */
+  --border:        rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* status */
+  --green:  #34d399;
+  --yellow: #fbbf24;
+  --red:    #f87171;
+
+  /* radius scale (one source of truth) */
+  --radius:    14px;
+  --radius-sm:  8px;
+  --radius-lg: 20px;
+
+  /* depth */
+  --shadow:    0 8px 30px rgba(0, 0, 0, 0.45);
+  --card-glow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  /* page wash + dot-matrix tint (theme-aware; light re-points below) */
+  --bg-grad: radial-gradient(ellipse at center, #0a0a0a 0%, #060606 55%, #000000 100%);
+  --dot-rgb: 255, 255, 255;   /* white dots on the black board */
+
+  /* god-mode semantic surfaces (theme-aware; light re-points below) */
+  --gm-nav-bg:   rgba(0, 0, 0, 0.97);   /* sticky nav backdrop */
+  --gm-track:    rgba(0, 0, 0, 0.3);    /* bar/progress track wells */
+  --gm-well:     rgba(0, 0, 0, 0.22);   /* inset panel/well surfaces */
+  --gm-fill-soft: rgba(255, 255, 255, 0.06); /* unfilled soft bars */
+  --gm-hover:    rgba(255, 255, 255, 0.04);  /* row hover */
+  --gm-zebra:    rgba(255, 255, 255, 0.02);  /* odd-row stripe */
+  --gm-tip-bg:   rgba(15, 23, 42, 0.97);     /* tooltip body */
+  --gm-tip-border: rgba(148, 163, 184, 0.22);
+  --gm-on-accent: #ffffff;              /* text on a colored fill */
+  --gm-code-bg:  rgba(255, 255, 255, 0.08);  /* inline <code> chips */
+  --gm-hairline: rgba(148, 163, 184, 0.12);  /* faint internal rules */
+  --ds-tile:     #0f0f0f;               /* data-science section tiles (rows + fleet KPIs) */
+  --ds-tile-shadow: none;               /* dark: flat, no lift needed */
+  --ds-well:     rgba(255,255,255,0.05); /* inner kpi cells on a ds tile */
+
+  /* type */
+  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-display: "Rajdhani", "IBM Plex Sans", sans-serif;
+}
+
+/* ============================================================================
+ * LIGHT MODE — full page. Re-points the surface ladder, text ramp, borders,
+ * page wash and dot tint. Dark stays the default (:root above). Status hues
+ * (--green/--yellow/--red) and --accent are intentionally unchanged so the
+ * meaning of color is identical in both modes.
+ * ==========================================================================*/
+[data-theme="light"] {
+  --bg:       #eef0f3;
+  --panel:    #ffffff;
+  --card:     #f7f8fa;
+  --elevated: #eef0f3;
+
+  --text:  #0f1115;
+  --muted: #565b66;
+  --faint: #8b909a;
+
+  --border:        rgba(15, 17, 21, 0.10);
+  --border-strong: rgba(15, 17, 21, 0.18);
+
+  --shadow:    0 8px 30px rgba(15, 17, 21, 0.12);
+  --card-glow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+
+  --bg-grad: radial-gradient(ellipse at center, #f6f7f9 0%, #eceef2 55%, #e4e7ec 100%);
+  --dot-rgb: 24, 28, 36;     /* dark slate dots on the light wash */
+
+  /* god-mode semantic surfaces — light */
+  --gm-nav-bg:   rgba(255, 255, 255, 0.97);
+  --gm-track:    rgba(15, 17, 21, 0.06);
+  --gm-well:     rgba(15, 17, 21, 0.04);
+  --gm-fill-soft: rgba(15, 17, 21, 0.06);
+  --gm-hover:    rgba(15, 17, 21, 0.04);
+  --gm-zebra:    rgba(15, 17, 21, 0.02);
+  --gm-tip-bg:   rgba(255, 255, 255, 0.98);
+  --gm-tip-border: rgba(15, 17, 21, 0.14);
+  --gm-on-accent: #ffffff;
+  --gm-code-bg:  rgba(15, 17, 21, 0.07);
+  --gm-hairline: rgba(15, 17, 21, 0.10);
+  --ds-tile:     #ffffff;               /* light: tiles pop white off the grey page */
+  --ds-tile-shadow: 0 1px 3px rgba(15,17,21,0.06), 0 4px 14px rgba(15,17,21,0.05);
+  --ds-well:     #eef0f3;               /* light: grey inset on white tile */
+}
+
+* { box-sizing: border-box; }
+
+/* Aurora background canvas — fixed behind everything, never interactive.
+ * The page gradient still paints under it (the canvas is mostly transparent),
+ * so the aurora reads as a quiet shimmer layered over the base background. */
+#aurora-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+}
+
+/* Lift real content above the aurora layer. */
+.topbar, main, .footbar, .godnav, .alert-toast-stack { position: relative; z-index: 1; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+/* Base background lives on html so the fixed dot-matrix canvas (a child of
+ * body, z-0) paints ABOVE it; body itself is transparent so the dots show.
+ * Pure black with a barely-there center lift — the dot-matrix carries the look. */
+html {
+  background: var(--bg-grad);
+  background-attachment: fixed;
+  background-color: var(--bg);
+}
+body { background: transparent; }
+
+body { padding: 18px; position: relative; }
+
+/* ===== TOPBAR ===== */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.topbar-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 2vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.topbar-sub {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.summary-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.chip-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.chip.running .chip-dot { background: var(--green); }
+.chip.idle .chip-dot { background: var(--yellow); }
+.chip.alarm .chip-dot { background: var(--red); }
+.chip.offline .chip-dot { background: var(--red); }
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.conn-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--muted);
+}
+.conn.live .conn-dot { background: var(--green); animation: pulse 2s infinite; }
+.conn.down .conn-dot { background: var(--red); }
+.conn.live .conn-text { color: var(--green); }
+.conn.down .conn-text { color: var(--red); }
+
+.cfg-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 12px;
+  width: 38px; height: 38px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.cfg-btn:hover { background: rgba(255, 255, 255, 0.09); }
+
+#conn { display: none; }
+#summaryChips { display: none; }
+
+/* ===== CARD GRID ===== */
+.machine-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+@media (max-width: 1300px) { .machine-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 980px)  { .machine-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px)  { .machine-grid { grid-template-columns: 1fr; } }
+/* Small screens: same boxes, tighter air. Grid stretch keeps each row even. */
+@media (max-width: 640px) {
+  .machine-card-box { min-height: 0; padding: 6px 7px; }
+  .machine-card-box-value { font-size: clamp(1.3rem, 7vw, 1.5rem); }
+  .ovr-pills { gap: 5px; }
+}
+
+.machine-card {
+  --machine-frame: #20bfe3;
+  --machine-frame-2: #18b8dd;
+  /* Container queries below size the shift grid by CARD width, so the
+   * approved 2-row sketch applies on wide cards and a stacked fallback on
+   * narrow ones, on any viewport. */
+  container-type: inline-size;
+  --machine-accent: #52c96a;
+  --machine-accent-rgb: 82, 201, 106;
+  --machine-soft: #bceff6;
+
+  /* Inner-panel theme layer. These hold the CURRENT light values; the
+   * [data-theme="dark"] .machine-card block below re-points them so only the
+   * inner panel flips. The colored status frame (--machine-frame/-2) is never
+   * overridden — it stays colored in both modes. */
+  --mc-panel: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(249, 250, 252, 0.98) 100%);
+  --mc-text: #07111f;          /* solid primary text */
+  --mc-ink: 7, 17, 31;         /* rgba base for soft/faint text (group A) */
+  --mc-ink2: 15, 23, 42;       /* rgba base for soft/faint text (group B) */
+  --mc-box: var(--machine-soft);
+  --mc-box-border: rgba(7, 17, 31, 0.04);
+  --mc-pill-bg: rgba(255, 255, 255, 0.42);
+  --mc-pill-border: rgba(255, 255, 255, 0.55);
+  --mc-glass: rgba(255, 255, 255, 0.55);
+  --mc-glass-inset: rgba(7, 17, 31, 0.05);
+
+  position: relative;
+  min-width: 0;
+  min-height: 540px;
+  border-radius: 40px;
+  color: var(--mc-text);
+}
+
+.machine-card-shell {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 36px;
+  padding: 7px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.30), transparent 30%),
+    linear-gradient(180deg, var(--machine-frame) 0%, var(--machine-frame-2) 100%);
+  box-shadow:
+    0 30px 70px rgba(3, 7, 18, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.machine-card:hover .machine-card-shell {
+  transform: translateY(-5px) scale(1.01);
+  box-shadow:
+    0 36px 86px rgba(3, 7, 18, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.machine-card.theme-running {
+  --machine-frame: #4ade80;
+  --machine-frame-2: #22c55e;
+  --machine-accent: #16a34a;
+  --machine-accent-rgb: 22, 163, 74;
+  --machine-soft: #d7f8e1;
+}
+
+.machine-card.theme-idle,
+.machine-card.theme-setup_manual {
+  --machine-frame: #38bdf8;
+  --machine-frame-2: #18b8dd;
+  --machine-accent: #0ea5e9;
+  --machine-accent-rgb: 14, 165, 233;
+  --machine-soft: #cdeefb;
+}
+
+.machine-card.theme-paused {
+  --machine-frame: #fbbf24;
+  --machine-frame-2: #f59e0b;
+  --machine-accent: #ea8a04;
+  --machine-accent-rgb: 234, 138, 4;
+  --machine-soft: #ffeccb;
+}
+
+.machine-card.theme-alarm,
+.machine-card.theme-e_stop {
+  --machine-frame: #ff8a8f;
+  --machine-frame-2: #f4555c;
+  --machine-accent: #ff6f75;
+  --machine-accent-rgb: 255, 111, 117;
+  --machine-soft: #ffd9dc;
+}
+
+.machine-card.theme-offline,
+.machine-card.theme-unavailable,
+.machine-card.theme-unknown {
+  --machine-frame: #f87171;
+  --machine-frame-2: #ef4444;
+  --machine-accent: #dc2626;
+  --machine-accent-rgb: 220, 38, 38;
+  --machine-soft: #ffdada;
+}
+
+/* ===== DARK MODE — inner panel only =====
+ * Re-points the --mc-* token layer to dark values. The colored status frame
+ * (--machine-frame/-2) and accent are intentionally NOT touched, so the border
+ * stays colored while the inner panel goes near-black to match the board.
+ * Driven by html[data-theme="dark"]; light mode (default attr absent or
+ * ="light") keeps the original values above. */
+[data-theme="dark"] .machine-card {
+  --mc-panel: linear-gradient(180deg, #16181d 0%, #0e1014 100%);
+  --mc-text: #f4f5f7;
+  --mc-ink: 244, 245, 247;
+  --mc-ink2: 244, 245, 247;
+  --mc-box: rgba(255, 255, 255, 0.045);
+  --mc-box-border: rgba(255, 255, 255, 0.07);
+  --mc-pill-bg: rgba(255, 255, 255, 0.06);
+  --mc-pill-border: rgba(255, 255, 255, 0.12);
+  --mc-glass: rgba(255, 255, 255, 0.06);
+  --mc-glass-inset: rgba(255, 255, 255, 0.08);
+  /* status-tinted boxes (--machine-soft) are bright; swap for a neutral dark
+   * fill so values stay legible on the dark panel. */
+  --machine-soft: rgba(255, 255, 255, 0.05);
+}
+
+/* RUNNING pill (dark mode only): the generic faint-white pill bg leaves the
+ * near-white pill text unreadable. Give it the green status fill + black text
+ * so PRODUCTION reads at a glance. Light mode keeps its original treatment. */
+[data-theme="dark"] .status-pill.status-running {
+  color: #000;
+  background: rgb(171, 242, 196);
+  border-color: rgb(171, 242, 196);
+  opacity: 1;
+}
+
+/* IDLE / STANDBY pill (dark mode only): same readability fix, light-blue fill
+ * + black text so IDLE reads against the dark panel. */
+[data-theme="dark"] .status-pill.status-idle {
+  color: #000;
+  background: rgb(186, 224, 255);
+  border-color: rgb(186, 224, 255);
+  opacity: 1;
+}
+
+/* Remaining states (dark mode only): same readable treatment so every pill
+ * has black text on a solid status-tinted fill, never faint-on-dark. */
+[data-theme="dark"] .status-pill.status-paused,
+[data-theme="dark"] .status-pill.status-setup_manual {
+  color: #000;
+  background: rgb(253, 224, 138);   /* amber — paused / manual */
+  border-color: rgb(253, 224, 138);
+  opacity: 1;
+}
+[data-theme="dark"] .status-pill.status-alarm,
+[data-theme="dark"] .status-pill.status-e_stop {
+  color: #000;
+  background: rgb(255, 168, 168);   /* red — alarm / e-stop */
+  border-color: rgb(255, 168, 168);
+  opacity: 1;
+}
+[data-theme="dark"] .status-pill.status-offline,
+[data-theme="dark"] .status-pill.status-unavailable {
+  color: #000;
+  background: rgb(255, 168, 168);   /* red — offline/unavailable, per shop request */
+  border-color: rgb(255, 168, 168);
+  opacity: 1;
+}
+[data-theme="dark"] .status-pill.status-unknown {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);   /* neutral grey — unknown only */
+  border-color: rgba(255, 255, 255, 0.22);
+  opacity: 1;
+}
+
+/* OFFLINE pill (light mode): red fill + black text so a dead feed reads at a
+ * glance, per shop request. Other states keep the neutral light treatment. */
+.status-pill.status-offline,
+.status-pill.status-unavailable {
+  color: #000;
+  background: rgb(255, 168, 168);
+  border-color: rgb(255, 168, 168);
+  opacity: 1;
+}
+
+/* inner panel shadow: drop the light-mode bright inset, deepen the lift */
+[data-theme="dark"] .card-panel {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 14px 28px rgba(0, 0, 0, 0.45);
+}
+
+
+.machine-card-eyebrow {
+  position: relative;
+  z-index: 1;
+  min-height: 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 3px 16px;
+  color: #031323;
+}
+
+.machine-card-mode {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 1.2vw, 1.65rem);
+  font-weight: 700;
+  line-height: 0.96;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Stopped counter: a centered glass overlay floating over the cycle panel.
+ * Out of flow, so showing it never moves a row or resizes the card. The cycle
+ * panel is the positioning context and clips the blur inside its bounds.
+ * Hidden until the stoppage passes the grace period (app.js). */
+.machine-card-idle-time {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #fde68a;
+  white-space: nowrap;
+}
+/* Real blur, clipped to the cycle panel container so it never spills onto the
+ * card border. The ::before paints the frost layer with a vertical gradient
+ * mask that fades top and bottom. */
+.machine-card-idle-time::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.28);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 28%, black 72%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, black 28%, black 72%, transparent);
+}
+.machine-card-idle-time > span { position: relative; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6); }
+
+/* the [hidden] attribute is display:none at low priority — the flex above wins
+ * over it and would leave the band up on every card during the silent phase. */
+.machine-card-idle-time[hidden] { display: none; }
+
+.mc-idle-label {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  opacity: 0.85;
+}
+
+/* The duration is the read-first number, so it is set large. */
+.mc-idle-clock {
+  font-family: var(--font-display);
+  font-size: clamp(3.5rem, 4.5vw, 5rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A stoppage past the grace period re-points the frame tokens to the amber
+ * family theme-paused uses, so the whole card border reads yellow whatever the
+ * underlying status theme was. Set from JS as an attribute only — every visual
+ * lives here. */
+.machine-card[data-idle-alert="1"] {
+  --machine-frame: #fbbf24;
+  --machine-frame-2: #f59e0b;
+  --machine-accent: #ea8a04;
+  --machine-accent-rgb: 234, 138, 4;
+}
+
+.machine-card[data-idle-alert="1"] .machine-card-shell {
+  animation: idle-frame-blink 1.1s ease-in-out infinite;
+}
+
+/* The overlay itself stays steady while shown; the frame blink above carries
+ * the alert, so the large duration remains readable. */
+
+/* Gentle on the frame (it is a large area), hard on the small timer row.
+ * The frame keyframe repeats the shell's radial highlight layer because
+ * `background` is a shorthand — omitting it would drop the gloss mid-blink. */
+@keyframes idle-frame-blink {
+  0%, 100% {
+    background:
+      radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.30), transparent 30%),
+      linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+  }
+  50% {
+    background:
+      radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.30), transparent 30%),
+      linear-gradient(180deg, #fde047 0%, #fbbf24 100%);
+  }
+}
+
+/* Rest frames read the row's own tokens so one keyframe serves both themes.
+ * The peak frame must also force the dark ink: dark mode's amber text on the
+ * bright #fde047 peak measures 1.06:1, i.e. the counter vanishes on every
+ * blink. Flipping the foreground with the background keeps it at 10.9:1. */
+@keyframes idle-clock-blink {
+  0%, 100% {
+    background: var(--mc-idle-bg);
+    box-shadow: inset 0 0 0 1px var(--mc-idle-ring);
+    color: var(--mc-idle-fg);
+  }
+  50% {
+    background: #fde047;
+    box-shadow: inset 0 0 0 2px #b45309, 0 0 12px rgba(245, 158, 11, 0.55);
+    color: #3b2600;
+  }
+}
+
+/* Blink is an attention cue, not the message: with motion reduced the card keeps
+ * the solid amber frame and the counter stays fully legible. */
+@media (prefers-reduced-motion: reduce) {
+  .machine-card[data-idle-alert="1"] .machine-card-shell,
+  .machine-card[data-idle-alert="1"] .machine-card-idle-time {
+    animation: none;
+  }
+  .machine-card[data-idle-alert="1"] .machine-card-idle-time {
+    background: #fde047;
+    box-shadow: inset 0 0 0 2px #b45309;
+    color: #3b2600;
+  }
+}
+
+
+.machine-card-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 5px;
+  padding: 0;
+  gap: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Split card: two dark panels inside the green shell with a green gap
+ * between them. Top holds everything through the cycle block; bottom
+ * holds the shift block. Same corners, same side gaps. */
+.card-panel {
+  border-radius: 24px;
+  padding: 18px;
+  overflow: hidden;
+  background: var(--mc-panel);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 14px 28px rgba(15, 23, 42, 0.12);
+}
+
+.machine-card-header {
+  position: relative;
+  z-index: 1;
+}
+
+.machine-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.machine-card-mode2 {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-family: var(--font-display);
+  font-size: clamp(0.8rem, 0.8vw, 1rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: rgba(var(--mc-ink), 0.5);
+  white-space: nowrap;
+}
+
+/* per-value tint for the two mode rows. Defaults stay muted; modifiers add the
+ * status color. Tuned to read on both the light and dark machine panels. */
+.mc-mode-line { line-height: 1; }
+.mc-mode-ctrl { font-size: 0.82em; }
+.mc-mode-exec { font-size: 1em; }
+.mc-mode-line.is-muted   { color: rgba(var(--mc-ink), 0.45); }
+.mc-mode-line.is-auto    { color: #38bdf8; }   /* automatic — cyan/blue */
+.mc-mode-line.is-manual  { color: #f59e0b; }   /* manual / mdi — amber */
+.mc-mode-line.is-active  { color: #22c55e; }   /* active — green */
+.mc-mode-line.is-paused  { color: #f59e0b; }   /* feed-hold / paused — amber */
+.mc-mode-line.is-stopped { color: #ef4444; }   /* stopped — red */
+.mc-mode-line.is-ready   { color: #38bdf8; }   /* ready — blue */
+
+.machine-card-title {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 0.88;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--mc-text);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 5.2rem;
+  max-width: 8.2rem;
+  padding: 7px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--mc-pill-border);
+  background: var(--mc-pill-bg);
+  color: var(--mc-text);
+  font-family: var(--font-display);
+  font-size: clamp(0.95rem, 0.92vw, 1.18rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 0.95;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.machine-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.85fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.machine-card-box {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 2px;
+  min-height: 0;
+  padding: 6px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--mc-box-border);
+  background: var(--mc-box);
+  color: var(--mc-text);
+}
+
+.machine-card-box-wide {
+  grid-column: 1 / span 2;
+  min-height: 0;
+}
+
+/* --- overrides as three F/R/S pills (Apple-clean, matches mock) --- */
+.ovr-pills {
+  display: flex;
+  gap: 6px;
+  margin-top: 0;
+}
+
+.ovr-pill {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 4px;
+  border-radius: 14px;
+  background: var(--mc-glass);
+  box-shadow: inset 0 0 0 1px var(--mc-glass-inset);
+}
+
+/* Warning glyph sits hidden in the pill corner until the override goes
+ * off-nominal (≠100%), then the pill blinks yellow and the ⚠ shows. */
+.ovr-pill-warn {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: #b45309;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ovr-pill.ovr-warn {
+  animation: ovr-blink 1s steps(1, start) infinite;
+}
+
+.ovr-pill.ovr-warn .ovr-pill-warn {
+  opacity: 1;
+}
+
+.ovr-pill.ovr-warn .ovr-pill-key,
+.ovr-pill.ovr-warn .ovr-pill-val {
+  color: #7c2d12;
+}
+
+@keyframes ovr-blink {
+  0%, 100% {
+    background: var(--mc-glass);
+    box-shadow: inset 0 0 0 1px var(--mc-glass-inset);
+  }
+  50% {
+    background: #fde047;
+    box-shadow: inset 0 0 0 2px #f59e0b, 0 0 12px rgba(245, 158, 11, 0.55);
+  }
+}
+
+.ovr-pill-key {
+  font-family: var(--font-display);
+  font-size: clamp(0.92rem, 0.9vw, 1.12rem);
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(var(--mc-ink), 0.55);
+}
+
+.ovr-pill-val {
+  font-family: var(--font-display);
+  font-size: clamp(0.92rem, 0.92vw, 1.16rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--mc-text);
+}
+
+/* --- parts box: big count over water-fill progress --- */
+.machine-card-box-parts {
+  position: relative;
+  overflow: hidden;
+}
+
+.parts-water-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.machine-card-box-parts > .machine-card-box-label,
+.machine-card-box-parts > .machine-card-parts-row,
+.machine-card-box-parts > .machine-card-box-note {
+  position: relative;
+  z-index: 1;
+}
+
+.machine-card-parts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.machine-card-box-parts .machine-card-box-value {
+  font-size: clamp(1.9rem, 2vw, 2.6rem);
+  line-height: 0.9;
+}
+
+/* --- spindle row: big RPM on the left, heartbeat wave on the right --- */
+.machine-card-box-spindle {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  min-height: 77px;
+}
+/* ACTIVE with 0 RPM cuts nothing: blink the spindle box (reuses ovr-blink).
+ * Theme stays RUNNING so chips and card agree; the box carries the warn. */
+.machine-card-box-spindle.is-no-cut {
+  animation: ovr-blink 1s steps(1, start) infinite;
+}
+.machine-card-box-spindle.is-no-cut .machine-card-box-value {
+  color: #7c2d12;
+}
+.machine-card-box-spindle .machine-card-box-value {
+  font-size: clamp(1.8rem, 1.9vw, 2.5rem);
+}
+
+.machine-card-spindle-left {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.spindle-wave {
+  position: relative;          /* anchor the absolutely-positioned canvas */
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05), transparent 70%),
+    linear-gradient(180deg, #0c1320 0%, #05080e 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 0 22px rgba(0, 0, 0, 0.55);
+}
+
+.spindle-wave-canvas {
+  /* absolute fill so the canvas's intrinsic 300x150 default can never push the
+   * box taller on first paint (the cold-load oversize bug). Matches the
+   * parts-water canvas treatment. */
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* "Part count instead of RPM graph" (html[data-spindle-parts="on"]): the
+ * right side of the spindle row shows this machine's PARTS value in place of
+ * the trace. Off (default) keeps the graph and hides this readout. */
+.spindle-parts {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  text-align: right;
+}
+.spindle-parts-value {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 1.9vw, 2.5rem);
+  font-weight: 700;
+  line-height: 0.86;
+  letter-spacing: -0.04em;
+  color: var(--mc-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+html[data-spindle-parts="on"] .spindle-wave { display: none; }
+html[data-spindle-parts="on"] .spindle-parts { display: flex; }
+
+.machine-card-box-label {
+  margin-bottom: 2px;
+  color: rgba(var(--mc-ink2), 0.6);
+  font-family: var(--font-body);
+  font-size: clamp(0.84rem, 0.82vw, 1.02rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.machine-card-box-value {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 1.5vw, 2.1rem);
+  font-weight: 700;
+  line-height: 0.86;
+  letter-spacing: -0.04em;
+  color: var(--mc-text);
+}
+
+.machine-card-box-note {
+  margin-top: 2px;
+  min-height: 0;
+  color: rgba(var(--mc-ink2), 0.64);
+  font-size: clamp(0.74rem, 0.72vw, 0.88rem);
+  font-weight: 700;
+  line-height: 1.26;
+}
+.machine-card-box-note:empty { display: none; }
+
+/* Full-green stage: the canvas floods the box, so the text flips to dark ink
+ * to stay readable in both themes. */
+.machine-card-box-parts[data-fill="full"] .machine-card-box-value,
+.machine-card-box-parts[data-fill="full"] .machine-card-box-label { color: #04140b; }
+
+/* Number pop when a part finishes (transform-only: never moves layout). */
+.machine-card-box-parts .machine-card-box-value.is-bump { animation: parts-bump 0.45s ease-out 1; }
+@keyframes parts-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .machine-card-box-parts .machine-card-box-value.is-bump { animation: none; }
+}
+
+/* ===== 3D toolpath viz (permanently reserved slot: live, frozen, or empty) ===== */
+.toolpath {
+  position: relative;
+  margin-top: 18px;
+  min-height: 150px;
+  height: 150px;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.06), transparent 60%),
+    linear-gradient(180deg, #0c1320 0%, #060a12 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 40px rgba(0, 0, 0, 0.55);
+}
+/* Frozen fault frame: held still and dimmed, never hidden, never collapsed. */
+.toolpath--frozen .toolpath-canvas { opacity: 0.55; }
+
+.toolpath-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.toolpath-tag {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.toolpath-zoom {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolpath-zoom-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.toolpath-zoom-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.toolpath-zoom-btn:active { transform: scale(0.92); }
+
+/* ===== cycle panel (transparent — only the bar track is black) ===== */
+.cycle-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.cycle-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.cycle-panel-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: clamp(0.84rem, 0.82vw, 0.98rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgba(var(--mc-ink2), 0.46);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cycle-panel-pct {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 1.7vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--mc-text);
+}
+
+.cycle-panel-bar {
+  margin-top: 7px;
+  height: 30px;
+  padding: 5px;
+  border-radius: 16px;
+  background: #0a0e14;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.cycle-panel-bar > span {
+  display: block;
+  height: 100%;
+  min-width: 16px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #7dff4d 0%, #39d11f 55%, #2bb015 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 12px rgba(74, 222, 74, 0.45);
+}
+
+.cycle-panel-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(0.78rem, 0.78vw, 0.9rem);
+  letter-spacing: 0.01em;
+  color: rgba(var(--mc-ink2), 0.5);
+}
+
+.card-panel--bottom { margin-top: auto; position: relative; }
+.card-panel--bottom:has(.shift-panel[hidden]) { display: none; }
+/* Experimental container vibe: current shift's sky behind all shift content. */
+.shift-vibe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.shift-vibe-on .shift-vibe.is-visible { opacity: 1; }
+.shift-vibe svg { width: 100%; height: 100%; }
+.shift-vibe-on .shift-panel { position: relative; z-index: 1; }
+
+/* ===== shift guard — NEW, lives in the bottom card panel ===== */
+.shift-panel {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 11px;
+}
+.shift-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.shift-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1rem, 1.05vw, 1.35rem);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.shift-pill--active {
+  background: #0a0e14;
+  color: #7dff4d;
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(74, 222, 74, 0.35);
+}
+.shift-panel-parts {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1rem, 1.05vw, 1.35rem);
+  color: rgba(var(--mc-ink2), 0.6);
+}
+
+/* Clock-quality note docked in the OVERRIDES label row, small. Visibility
+ * keeps the row height so note and no-note machines stay aligned. */
+.machine-card-box-ovr .machine-card-box-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.machine-card-box-ovr .shift-clock-note { font-size: 0.72em; margin-left: auto; white-space: nowrap; }
+.shift-clock-note {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--yellow);
+  opacity: 0.85;
+  white-space: nowrap;
+  cursor: help;
+}
+.shift-panel-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;   /* SP ON left, SP OFF right — never stack when the live
+                        * timer widens between polls */
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1rem, 1.1vw, 1.4rem);
+  letter-spacing: 0.01em;
+  color: rgba(var(--mc-ink2), 0.62);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.shift-panel-seg {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;   /* label + chip stay together; tabular digits keep the
+                          * ticking seconds from changing the chip width */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.shift-panel-seg--off {
+  margin-left: auto;   /* pin OFF to the right even if ON shrinks */
+}
+/* Shift block: two previous shifts up top, SESSION line under them, and the
+ * current share owning the right column across both rows (wide cards). */
+.shift-prev {
+  display: grid;
+  grid-template-columns: 1.15fr 1.15fr 0.7fr;
+  gap: 6px;
+  align-items: start;
+}
+/* Narrow fallback (also anything without container-query support): row 1 the
+ * three boxes, row 2 the SESSION line full width. */
+.shift-prev .shift-session-label {
+  grid-column: 1 / span 3;
+  align-self: center;
+  min-width: 0;
+}
+/* Wide cards: the approved sketch — the two previous shifts share row 1, the
+ * SESSION line sits under them, and the current box spans both rows right. */
+@container (min-width: 450px) {
+  .shift-prev-box--current {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  .shift-prev .shift-session-label {
+    grid-column: 1 / span 2;
+  }
+}
+/* Phones: everything stacks full width in DOM order. */
+@media (max-width: 640px) {
+  .shift-prev {
+    grid-template-columns: 1fr;
+  }
+  .shift-prev-box--current {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .shift-prev .shift-session-label {
+    grid-column: auto;
+  }
+}
+.shift-prev[hidden] { display: none; }
+.shift-prev-box {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  min-width: 0;
+  font-family: var(--font-display);
+  padding: 6px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--mc-ink2), 0.14);
+  white-space: nowrap;
+}
+.shift-prev-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 800;
+  font-size: clamp(0.7rem, 0.8vw, 0.9rem);
+  letter-spacing: 0.04em;
+  color: rgba(var(--mc-ink2), 0.75);
+}
+/* The number is the read-first element: large and amber, per the wall sketch. */
+.shift-prev-pct {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 4px;
+  border-left: 1px solid rgba(var(--mc-ink2), 0.14);
+  font-weight: 800;
+  font-size: clamp(1rem, 1.1vw, 1.3rem);
+  letter-spacing: -0.01em;
+  color: #fbbf24;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* The current shift's box reads live, so it gets the green treatment. */
+.shift-prev-box--active {
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.08);
+  color: #4ade80;
+}
+.shift-prev-box--active .shift-prev-pct {
+  color: #4ade80;
+  border-left-color: rgba(74, 222, 128, 0.35);
+}
+/* Last-5 jobs timeline: dotted rail with dot markers, current filled green.
+ * Reserved min-height keeps one empty row without reflow before history lands. */
+.prog-timeline {
+  grid-column: 1 / span 2;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--mc-ink2), 0.14);
+  font-family: var(--font-display);
+}
+.prog-timeline-list {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 28px;
+  min-height: 44px;
+  list-style: none;
+}
+.prog-timeline-list::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  bottom: 8px;
+  border-left: 2px dotted rgba(var(--mc-ink2), 0.25);
+}
+.prog-tl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: clamp(0.8rem, 0.85vw, 1rem);
+  white-space: nowrap;
+}
+.prog-tl-dot {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-left: -28px;
+  border-radius: 999px;
+  background: #1a2230;
+  border: 2px solid #4ade80;
+  color: #4ade80;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+}
+.prog-tl-cur .prog-tl-dot { background: #4ade80; border-color: #4ade80; animation: prog-tl-blink 1.6s ease-in-out infinite; }
+@keyframes prog-tl-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.prog-tl-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+.prog-tl-meta {
+  flex: 0 0 auto;
+  color: rgba(var(--mc-ink2), 0.65);
+  font-variant-numeric: tabular-nums;
+}
+.prog-tl-empty { color: rgba(var(--mc-ink2), 0.45); }
+/* Padding slots: invisible but full-height, so short histories align. */
+.prog-tl-pad { visibility: hidden; }
+/* Session spindle share: label plus bar, sitting directly in the panel.
+ * Pulled tight under the shift boxes above (the panel's own gap is wider). */
+.shift-session {
+  margin-top: -10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.shift-session-label {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(0.8rem, 0.9vw, 1.1rem);
+  letter-spacing: 0.02em;
+  color: #4ade80;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Session time chips: small rounded boxes telling the two times apart —
+ * green for spindle-ON, neutral for the shift total. */
+.sess-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px 2px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sess-chip--on {
+  background: rgba(74, 222, 128, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.45);
+  color: #4ade80;
+}
+.sess-chip--tot {
+  background: rgba(148, 163, 184, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.4);
+  color: rgba(var(--mc-ink2), 0.85);
+}
+/* Spindle on/off time chips above the bar: same small pill treatment as the
+ * session chips — green for ON, red for OFF. */
+.sp-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px 2px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sp-chip--on {
+  background: rgba(74, 222, 128, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.45);
+  color: #4ade80;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.sp-chip--on[data-spindle="on"] {
+  background: rgba(22, 163, 74, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.7);
+}
+.sp-chip--off {
+  background: rgba(248, 113, 113, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
+/* Current shift share: rectangular box with the big session number, owning the
+ * right column across both rows (wide cards). Same box treatment as the
+ * previous-shift boxes; art stays hidden so the number is clean. */
+.shift-prev-box--current {
+  justify-content: center;
+  align-items: center;
+  align-self: stretch;
+  min-height: 0;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.08);
+}
+.shift-prev-box--current .shift-prev-art { display: none; }
+.shift-prev-cur {
+  font-weight: 800;
+  font-size: clamp(1.5rem, 1.8vw, 2rem);
+  letter-spacing: -0.02em;
+  color: #4ade80;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* Continuous session fill, driven by --sess-rgb/--sess-a/--sess-ink from
+ * paintSession: red melts through amber to green as the percentage climbs,
+ * deepening as it goes. Transitions keep every step smooth. */
+.shift-prev-box--current[data-sess] {
+  border-color: rgba(var(--sess-rgb), 0.6);
+  background:
+    linear-gradient(180deg,
+      rgba(var(--sess-rgb), var(--sess-a)),
+      rgba(var(--sess-rgb), calc(var(--sess-a) * 0.5)));
+  box-shadow: 0 0 18px rgba(var(--sess-rgb), 0.35);
+  transition: border-color 0.6s ease, box-shadow 0.6s ease;
+}
+.shift-prev-box--current[data-sess] .shift-prev-cur {
+  color: var(--sess-ink);
+  transition: color 0.6s ease;
+}
+/* Confined light sweep: the "floating" shimmer lives only inside this box
+ * (overflow hidden + inherited radius clip it), passing over the number. */
+.shift-prev-box--current[data-sess]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.22) 50%, transparent 70%);
+  transform: translateX(-120%);
+  animation: sess-sheen 3.2s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+@keyframes sess-sheen {
+  0% { transform: translateX(-120%); }
+  55%, 100% { transform: translateX(120%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shift-prev-box--current[data-sess]::after { animation: none; }
+}
+/* Experimental day-phase art: decorative sky per shift, background only.
+ * Visibility is gated on shift-art-on (one-flag removal); the layer is
+ * absolute + pointer-transparent so it can never move layout or text. */
+.shift-prev-box { position: relative; overflow: hidden; }
+.shift-prev-art {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.shift-art-on .shift-prev-art.is-visible { opacity: 1; }
+.shift-prev-art svg { width: 26px; height: 26px; flex: 0 0 auto; margin-right: 6px; }
+/* Previous-shift icon docks inline left of the name in its own 22px slot, so
+ * it can never slide under the percentage the way the old overlay did. */
+.shift-prev-box > .shift-prev-art {
+  position: static;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  justify-content: center;
+}
+.shift-prev-box > .shift-prev-art svg { width: 18px; height: 18px; margin-right: 0; }
+.shift-art-on .shift-prev-name,
+.shift-art-on .shift-prev-pct,
+.shift-art-on .shift-prev-cur { position: relative; z-index: 1; }
+.shift-art-on .art-cloud { animation: shift-drift 12s ease-in-out infinite; }
+.shift-art-on .art-rays { animation: shift-spin 24s linear infinite; transform-box: fill-box; transform-origin: center; }
+/* Corner vibe sun turns slowly behind the shift content. */
+.shift-vibe-on .shift-vibe .art-rays { animation: shift-spin 40s linear infinite; transform-box: fill-box; transform-origin: center; }
+.shift-art-on .art-star { animation: shift-twinkle 3s ease-in-out infinite; }
+.shift-art-on .art-star--d2 { animation-delay: 1s; }
+.shift-art-on .art-star--d3 { animation-delay: 2s; }
+.shift-art-on .art-moon { animation: shift-breathe 5s ease-in-out infinite; }
+@keyframes shift-drift { 0%, 100% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
+@keyframes shift-spin { to { transform: rotate(360deg); } }
+@keyframes shift-twinkle { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+@keyframes shift-breathe { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .shift-art-on .shift-prev-art *,
+  .shift-vibe-on .shift-vibe *,
+  .prog-tl-cur .prog-tl-dot { animation: none !important; }
+}
+.shift-chute.shift-chute--session {
+  height: 10px;
+  margin-top: 4px;
+}
+/* Spindle on/off read as green/red at a glance; warn keeps its emphasis. */
+.shift-panel-seg--on { color: #4ade80; }
+.shift-panel-seg--off { color: #f87171; }
+.shift-chute-future { display: none; }
+
+
+
+
+
+
+
+
+
+
+/* shift chute — the little 8h timeline bar: green running, red stopped, grey future (empty chute → slowly fills) */
+.shift-chute {
+  display: flex;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(var(--mc-ink2), 0.08);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.12);
+  margin-top: 0;
+}
+.shift-chute-running { background: #16a34a; transition: width 0.4s ease; min-width: 0; }
+.shift-chute-stopped { background: #ef4444; transition: width 0.4s ease; min-width: 0; }
+.shift-chute-future  { background: rgba(var(--mc-ink2), 0.12); transition: width 0.4s ease; min-width: 0; flex: 1 1 auto; }
+.shift-chute[hidden] { display:none !important; }
+
+/* sequence pulse marker on footer when progressing */
+.seq-live-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: var(--machine-accent);
+  vertical-align: middle;
+}
+.seq-live .seq-live-dot { animation: pulse 1.4s infinite; }
+.seq-stall .seq-live-dot { background: #94a3b8; animation: none; }
+
+/* ===== chrome ===== */
+.empty-note { color: var(--muted); text-align: center; margin-top: 60px; }
+
+.footbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.65); }
+  70%  { box-shadow: 0 0 0 14px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+/* ===== dashboard settings (per-device) =====
+ * Panel + PARTS popover are fixed overlays; toggled card rows keep reserved
+ * slots (visibility/min-height), so cards never reflow. */
+.tv-cfg-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 12px;
+  width: 38px; height: 38px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.tv-cfg-btn:hover { background: rgba(255, 255, 255, 0.09); }
+
+/* Fullscreen fallback when the API is unavailable or denied. */
+html.dash-fs-fallback body {
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+/* Theater effect so the fallback reads as fullscreen: chrome goes away. */
+html.dash-fs-fallback .footbar { display: none; }
+html.dash-fs-fallback .topbar-sub { display: none; }
+
+
+.preview-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: linear-gradient(180deg, rgba(8, 12, 22, 0.92), rgba(8, 12, 22, 0));
+  z-index: 9998;
+  pointer-events: none;
+}
+.preview-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.1rem, 1.5vw, 1.9rem);
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+.preview-clock {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(1rem, 1.3vw, 1.6rem);
+  color: var(--muted);
+}
+.preview-dots {
+  position: fixed;
+  bottom: 12px; left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 9px;
+  z-index: 9998;
+  pointer-events: none;
+}
+.preview-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.35);
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+.preview-dot.is-on { background: #38bdf8; transform: scale(1.35); }
+
+/* Intro / loading screen — a one-shot overlay that fades in, holds, fades out
+ * so the wall "loads like a PPT" before the first slide. */
+.preview-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: radial-gradient(circle at 50% 40%, #101a2e, #070b14 70%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.preview-intro.is-in { opacity: 1; }
+.preview-intro-mark {
+  width: 76px; height: 76px;
+  border-radius: 18px;
+  border: 3px solid #38bdf8;
+  box-shadow: 0 0 40px rgba(56, 189, 248, 0.5);
+  animation: previewPulse 1.4s ease-in-out infinite;
+}
+@keyframes previewPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(56, 189, 248, 0.35); }
+  50%      { transform: scale(1.08); box-shadow: 0 0 55px rgba(56, 189, 248, 0.7); }
+}
+.preview-intro-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.6rem, 3vw, 3rem);
+  letter-spacing: 0.08em;
+  color: #e2e8f0;
+}
+.preview-intro-sub {
+  font-size: clamp(0.9rem, 1.3vw, 1.2rem);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+/* ===== settings panel: scope tabs + wider controls ===== */
+.dash-cfg-tabs { display: flex; gap: 6px; margin: 10px 0 6px; }
+.dash-cfg-tab {
+  flex: 1 1 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.dash-cfg-tab.is-active { background: rgba(56, 189, 248, 0.16); color: var(--text); border-color: rgba(56, 189, 248, 0.5); }
+.dash-cfg-scopenote { font-size: 0.72rem; color: var(--muted); margin-bottom: 8px; min-height: 1.1em; }
+.dash-cfg-body { max-height: 62vh; overflow-y: auto; }
+.dash-cfg-row-btns { display: flex; gap: 8px; }
+.dash-cfg-btn-wide { width: 100%; margin-top: 6px; }
+.dash-cfg-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 4px 8px;
+}
+
+/* Display-section toggles: explicit user prefs, applied to this page only. */
+html[data-summary="off"] #summaryChips { display: none; }
+/* Summary section = the card's ranked program list plus the cycle block
+ * (CYCLE REMAINING %, bar, elapsed / left). One toggle, all of it. */
+html[data-summary="off"] .machine-card .prog-timeline,
+html[data-summary="off"] .machine-card .cycle-panel { display: none; }
+html[data-shifts="off"] .shift-panel { display: none; }
+
+/* Shift art layers are absolute decoration: hiding never moves layout. */
+html[data-shift-art="off"] .shift-prev-art,
+html[data-shift-art="off"] .shift-vibe { visibility: hidden; }
+
+/* Ranked PARTS affordance; the popover is a fixed overlay. */
+.machine-card-box-parts.is-ranked { cursor: pointer; }
+
+.dash-cfg-backdrop,
+.parts-pop-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 12, 0.55);
+}
+.dash-cfg-backdrop { z-index: 10000; }
+.parts-pop-backdrop { z-index: 10002; }
+.dash-cfg-backdrop[hidden],
+.dash-cfg-panel[hidden],
+.parts-pop-backdrop[hidden],
+.parts-pop[hidden] { display: none !important; }
+
+.dash-cfg-panel {
+  position: fixed;
+  top: 70px;
+  right: 16px;
+  z-index: 10001;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.dash-cfg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.dash-cfg-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+}
+
+.dash-cfg-x {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.dash-cfg-x:hover { color: var(--text); }
+
+.dash-cfg-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dash-cfg-sec-t {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.dash-cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  font-size: 0.85rem;
+}
+
+.dash-cfg-row > label { flex: 0 0 auto; min-width: 86px; color: var(--muted); }
+.dash-cfg-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.dash-cfg-row input[type="checkbox"] { accent-color: var(--accent); }
+
+.dash-cfg-btn {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.dash-cfg-btn:hover { background: rgba(255, 255, 255, 0.09); }
+
+.dash-cfg-foot {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.dash-cfg-save { flex: 1 1 auto; }
+
+.dash-cfg-note {
+  font-size: 0.72rem;
+  color: var(--faint);
+  letter-spacing: 0.03em;
+}
+
+.dash-cfg-hint {
+  font-size: 0.72rem;
+  color: var(--faint);
+  margin-top: 4px;
+}
+
+.parts-pop {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10003;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(480px, calc(100vh - 64px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.parts-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parts-pop-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.parts-pop-x {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.parts-pop-x:hover { color: var(--text); }
+
+.parts-pop-big {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(3rem, 3.4vw, 4.2rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.parts-pop-sub {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.parts-pop-list { display: flex; flex-direction: column; gap: 6px; }
+
+.parts-pop-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.parts-pop-rank {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.parts-pop-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.parts-pop-count {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.parts-pop-empty { font-size: 0.85rem; color: var(--muted); }
+
+.parts-pop-foot {
+  font-size: 0.72rem;
+  color: var(--faint);
+  letter-spacing: 0.03em;
+}
