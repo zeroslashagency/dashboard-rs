@@ -1077,9 +1077,72 @@ html[data-spindle-parts="on"] .spindle-parts { display: flex; }
   color: rgba(var(--mc-ink2), 0.5);
 }
 
-.card-panel--bottom { margin-top: auto; position: relative; }
+.card-panel.card-panel--bottom {
+  margin-top: auto;
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  background: linear-gradient(155deg, #13161e 0%, #0e1015 55%, #0c0e13 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 14px 28px rgba(0, 0, 0, 0.36);
+  --sp-ink: #f8fafc;
+  --sp-muted: rgba(203, 213, 225, 0.62);
+  --sp-faint: rgba(148, 163, 184, 0.52);
+  --sp-track: rgba(255, 255, 255, 0.07);
+  --sp-arc-outer: #4cb5f5;
+  --sp-arc-mid: #3ee04f;
+  --sp-arc-inner: #f45c6c;
+  --sp-tip-outer: #7dd3fc;
+  --sp-tip-mid: #86efac;
+  --sp-tip-inner: #fda4af;
+  --sp-phase-morning: #fbbf24;
+  --sp-tip-morning: #fde68a;
+  --sp-phase-afternoon: #ff6b4a;
+  --sp-tip-afternoon: #fdba74;
+  --sp-phase-night: #818cf8;
+  --sp-tip-night: #a5b4fc;
+  --sp-tip-ink: #080c12;
+  --sp-hub-bg: #ffffff;
+  --sp-hub-pct: #090d14;
+  --sp-hub-code: #334155;
+  --sp-prev-s2: #58bfff;
+  --sp-prev-s3: #f66b79;
+  --sp-chute-bg: rgba(255, 255, 255, 0.09);
+}
+[data-theme="light"] .card-panel.card-panel--bottom {
+  background: linear-gradient(155deg, #ffffff 0%, #f4f6fa 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    inset 0 0 0 1px rgba(15, 23, 42, 0.09),
+    0 12px 24px rgba(15, 23, 42, 0.10);
+  --sp-ink: #0f172a;
+  --sp-muted: rgba(51, 65, 85, 0.72);
+  --sp-faint: rgba(100, 116, 139, 0.72);
+  --sp-track: rgba(15, 23, 42, 0.08);
+  --sp-arc-outer: #0284c7;
+  --sp-arc-mid: #16a34a;
+  --sp-arc-inner: #e11d48;
+  --sp-tip-outer: #38bdf8;
+  --sp-tip-mid: #4ade80;
+  --sp-tip-inner: #fb7185;
+  --sp-phase-morning: #d97706;
+  --sp-tip-morning: #fbbf24;
+  --sp-phase-afternoon: #ea580c;
+  --sp-tip-afternoon: #fb923c;
+  --sp-phase-night: #4f46e5;
+  --sp-tip-night: #818cf8;
+  --sp-tip-ink: #080c12;
+  --sp-hub-bg: #0f172a;
+  --sp-hub-pct: #ffffff;
+  --sp-hub-code: #cbd5e1;
+  --sp-prev-s2: #0284c7;
+  --sp-prev-s3: #e11d48;
+  --sp-chute-bg: rgba(15, 23, 42, 0.09);
+}
 .card-panel--bottom:has(.shift-panel[hidden]) { display: none; }
-/* Experimental container vibe: current shift's sky behind all shift content. */
+/* Subtle top-left phase glow behind the shift header (morning/afternoon/night). */
 .shift-vibe {
   position: absolute;
   inset: 0;
@@ -1088,51 +1151,12 @@ html[data-spindle-parts="on"] .spindle-parts { display: flex; }
   transition: opacity 0.8s ease;
   overflow: hidden;
   border-radius: inherit;
+  z-index: 0;
 }
 .shift-vibe-on .shift-vibe.is-visible { opacity: 1; }
-.shift-vibe svg { width: 100%; height: 100%; }
+[data-theme="light"] .shift-vibe-on .shift-vibe.is-visible { opacity: 0.65; }
+.shift-vibe svg { width: 100%; height: 100%; display: block; }
 .shift-vibe-on .shift-panel { position: relative; z-index: 1; }
-
-/* ===== shift guard — NEW, lives in the bottom card panel ===== */
-.shift-panel {
-  margin-top: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  font-size: 11px;
-}
-.shift-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.shift-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  border-radius: 999px;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: clamp(1rem, 1.05vw, 1.35rem);
-  letter-spacing: 0.02em;
-  line-height: 1;
-}
-.shift-pill--active {
-  background: #0a0e14;
-  color: #7dff4d;
-  font-weight: 700;
-  box-shadow: 0 0 10px rgba(74, 222, 74, 0.35);
-}
-.shift-panel-parts {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: clamp(1rem, 1.05vw, 1.35rem);
-  color: rgba(var(--mc-ink2), 0.6);
-}
 
 /* Clock-quality note docked in the OVERRIDES label row, small. Visibility
  * keeps the row height so note and no-note machines stay aligned. */
@@ -1151,116 +1175,7 @@ html[data-spindle-parts="on"] .spindle-parts { display: flex; }
   white-space: nowrap;
   cursor: help;
 }
-.shift-panel-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: nowrap;   /* SP ON left, SP OFF right — never stack when the live
-                        * timer widens between polls */
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: clamp(1rem, 1.1vw, 1.4rem);
-  letter-spacing: 0.01em;
-  color: rgba(var(--mc-ink2), 0.62);
-  padding: 6px 10px;
-  border-radius: 8px;
-}
-.shift-panel-seg {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;   /* label + chip stay together; tabular digits keep the
-                          * ticking seconds from changing the chip width */
-  flex: 0 1 auto;
-  min-width: 0;
-}
-.shift-panel-seg--off {
-  margin-left: auto;   /* pin OFF to the right even if ON shrinks */
-}
-/* Shift block: two previous shifts up top, SESSION line under them, and the
- * current share owning the right column across both rows (wide cards). */
-.shift-prev {
-  display: grid;
-  grid-template-columns: 1.15fr 1.15fr 0.7fr;
-  gap: 6px;
-  align-items: start;
-}
-/* Narrow fallback (also anything without container-query support): row 1 the
- * three boxes, row 2 the SESSION line full width. */
-.shift-prev .shift-session-label {
-  grid-column: 1 / span 3;
-  align-self: center;
-  min-width: 0;
-}
-/* Wide cards: the approved sketch — the two previous shifts share row 1, the
- * SESSION line sits under them, and the current box spans both rows right. */
-@container (min-width: 450px) {
-  .shift-prev-box--current {
-    grid-column: 3;
-    grid-row: 1 / span 2;
-  }
-  .shift-prev .shift-session-label {
-    grid-column: 1 / span 2;
-  }
-}
-/* Phones: everything stacks full width in DOM order. */
-@media (max-width: 640px) {
-  .shift-prev {
-    grid-template-columns: 1fr;
-  }
-  .shift-prev-box--current {
-    grid-column: auto;
-    grid-row: auto;
-  }
-  .shift-prev .shift-session-label {
-    grid-column: auto;
-  }
-}
-.shift-prev[hidden] { display: none; }
-.shift-prev-box {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 5px;
-  min-width: 0;
-  font-family: var(--font-display);
-  padding: 6px 7px;
-  border-radius: 10px;
-  border: 1px solid rgba(var(--mc-ink2), 0.14);
-  white-space: nowrap;
-}
-.shift-prev-name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 800;
-  font-size: clamp(0.7rem, 0.8vw, 0.9rem);
-  letter-spacing: 0.04em;
-  color: rgba(var(--mc-ink2), 0.75);
-}
-/* The number is the read-first element: large and amber, per the wall sketch. */
-.shift-prev-pct {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: 4px;
-  border-left: 1px solid rgba(var(--mc-ink2), 0.14);
-  font-weight: 800;
-  font-size: clamp(1rem, 1.1vw, 1.3rem);
-  letter-spacing: -0.01em;
-  color: #fbbf24;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-/* The current shift's box reads live, so it gets the green treatment. */
-.shift-prev-box--active {
-  border-color: rgba(74, 222, 128, 0.55);
-  background: rgba(74, 222, 128, 0.08);
-  color: #4ade80;
-}
-.shift-prev-box--active .shift-prev-pct {
-  color: #4ade80;
-  border-left-color: rgba(74, 222, 128, 0.35);
-}
+
 /* Last-5 jobs timeline: dotted rail with dot markers, current filled green.
  * Reserved min-height keeps one empty row without reflow before history lands. */
 .prog-timeline {
@@ -1324,204 +1239,388 @@ html[data-spindle-parts="on"] .spindle-parts { display: flex; }
 .prog-tl-empty { color: rgba(var(--mc-ink2), 0.45); }
 /* Padding slots: invisible but full-height, so short histories align. */
 .prog-tl-pad { visibility: hidden; }
-/* Session spindle share: label plus bar, sitting directly in the panel.
- * Pulled tight under the shift boxes above (the panel's own gap is wider). */
-.shift-session {
-  margin-top: -10px;
+
+/* ===== Style 1C — Obsidian Phase Glow + Live Session Bar & Concentric Arcs ===== */
+.shift-panel.sp-obs {
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0;
+  min-height: clamp(128px, 38cqi, 166px);
 }
-.shift-session-label {
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: clamp(0.8rem, 0.9vw, 1.1rem);
-  letter-spacing: 0.02em;
-  color: #4ade80;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* Session time chips: small rounded boxes telling the two times apart —
- * green for spindle-ON, neutral for the shift total. */
-.sess-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px 2px;
-  border-radius: 999px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.sess-chip--on {
-  background: rgba(74, 222, 128, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.45);
-  color: #4ade80;
-}
-.sess-chip--tot {
-  background: rgba(148, 163, 184, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.4);
-  color: rgba(var(--mc-ink2), 0.85);
-}
-/* Spindle on/off time chips above the bar: same small pill treatment as the
- * session chips — green for ON, red for OFF. */
-.sp-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px 2px;
-  border-radius: 999px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.sp-chip--on {
-  background: rgba(74, 222, 128, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.45);
-  color: #4ade80;
-  transition: background 0.3s ease, box-shadow 0.3s ease;
-}
-.sp-chip--on[data-spindle="on"] {
-  background: rgba(22, 163, 74, 0.38);
-  box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.7);
-}
-.sp-chip--off {
-  background: rgba(248, 113, 113, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.45);
-  color: #f87171;
-}
-/* Current shift share: rectangular box with the big session number, owning the
- * right column across both rows (wide cards). Same box treatment as the
- * previous-shift boxes; art stays hidden so the number is clean. */
-.shift-prev-box--current {
-  justify-content: center;
-  align-items: center;
-  align-self: stretch;
-  min-height: 0;
-  padding: 6px 8px;
-  border-radius: 10px;
-  border-color: rgba(74, 222, 128, 0.55);
-  background: rgba(74, 222, 128, 0.08);
-}
-.shift-prev-box--current .shift-prev-art { display: none; }
-.shift-prev-cur {
-  font-weight: 800;
-  font-size: clamp(1.5rem, 1.8vw, 2rem);
-  letter-spacing: -0.02em;
-  color: #4ade80;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-/* Continuous session fill, driven by --sess-rgb/--sess-a/--sess-ink from
- * paintSession: red melts through amber to green as the percentage climbs,
- * deepening as it goes. Transitions keep every step smooth. */
-.shift-prev-box--current[data-sess] {
-  border-color: rgba(var(--sess-rgb), 0.6);
-  background:
-    linear-gradient(180deg,
-      rgba(var(--sess-rgb), var(--sess-a)),
-      rgba(var(--sess-rgb), calc(var(--sess-a) * 0.5)));
-  box-shadow: 0 0 18px rgba(var(--sess-rgb), 0.35);
-  transition: border-color 0.6s ease, box-shadow 0.6s ease;
-}
-.shift-prev-box--current[data-sess] .shift-prev-cur {
-  color: var(--sess-ink);
-  transition: color 0.6s ease;
-}
-/* Confined light sweep: the "floating" shimmer lives only inside this box
- * (overflow hidden + inherited radius clip it), passing over the number. */
-.shift-prev-box--current[data-sess]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.22) 50%, transparent 70%);
-  transform: translateX(-120%);
-  animation: sess-sheen 3.2s ease-in-out infinite;
-  pointer-events: none;
+.shift-panel.sp-obs[hidden] { display: none !important; }
+
+.sp-obs-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(4px, 1.5cqi, 8px);
+  padding: clamp(10px, 3cqi, 14px) 2px clamp(10px, 2.8cqi, 14px) clamp(12px, 3.6cqi, 17px);
+  min-width: 0;
+  position: relative;
   z-index: 2;
 }
-@keyframes sess-sheen {
-  0% { transform: translateX(-120%); }
-  55%, 100% { transform: translateX(120%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .shift-prev-box--current[data-sess]::after { animation: none; }
-}
-/* Experimental day-phase art: decorative sky per shift, background only.
- * Visibility is gated on shift-art-on (one-flag removal); the layer is
- * absolute + pointer-transparent so it can never move layout or text. */
-.shift-prev-box { position: relative; overflow: hidden; }
-.shift-prev-art {
-  position: absolute;
-  inset: 0;
+
+.sp-obs-head {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.6s ease;
+  gap: clamp(6px, 2cqi, 9px);
+  flex-wrap: nowrap;
+  min-width: 0;
 }
-.shift-art-on .shift-prev-art.is-visible { opacity: 1; }
-.shift-prev-art svg { width: 26px; height: 26px; flex: 0 0 auto; margin-right: 6px; }
-/* Previous-shift icon docks inline left of the name in its own 22px slot, so
- * it can never slide under the percentage the way the old overlay did. */
-.shift-prev-box > .shift-prev-art {
-  position: static;
+.sp-obs-phase-ico {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: clamp(20px, 6.2cqi, 28px);
+  height: clamp(20px, 6.2cqi, 28px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.sp-obs-phase-ico.is-visible { opacity: 1; }
+.sp-obs-phase-ico svg { width: 100%; height: 100%; display: block; }
+.sp-obs-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(0.98rem, 4.9cqi, 1.44rem);
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+  color: var(--sp-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-obs-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(5px, 1.8cqi, 9px);
+  min-width: 0;
+}
+.sp-obs-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(7px, 2.2cqi, 10px);
+  min-width: 0;
+}
+.sp-obs-ico {
+  flex: 0 0 auto;
+  width: clamp(20px, 5.8cqi, 26px);
+  height: clamp(20px, 5.8cqi, 26px);
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
 }
-.shift-prev-box > .shift-prev-art svg { width: 18px; height: 18px; margin-right: 0; }
-.shift-art-on .shift-prev-name,
-.shift-art-on .shift-prev-pct,
-.shift-art-on .shift-prev-cur { position: relative; z-index: 1; }
-.shift-art-on .art-cloud { animation: shift-drift 12s ease-in-out infinite; }
-.shift-art-on .art-rays { animation: shift-spin 24s linear infinite; transform-box: fill-box; transform-origin: center; }
-/* Corner vibe sun turns slowly behind the shift content. */
-.shift-vibe-on .shift-vibe .art-rays { animation: shift-spin 40s linear infinite; transform-box: fill-box; transform-origin: center; }
-.shift-art-on .art-star { animation: shift-twinkle 3s ease-in-out infinite; }
-.shift-art-on .art-star--d2 { animation-delay: 1s; }
-.shift-art-on .art-star--d3 { animation-delay: 2s; }
-.shift-art-on .art-moon { animation: shift-breathe 5s ease-in-out infinite; }
-@keyframes shift-drift { 0%, 100% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
-@keyframes shift-spin { to { transform: rotate(360deg); } }
-@keyframes shift-twinkle { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-@keyframes shift-breathe { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) {
-  .shift-art-on .shift-prev-art *,
-  .shift-vibe-on .shift-vibe *,
-  .prog-tl-cur .prog-tl-dot { animation: none !important; }
+.sp-obs-ico svg { width: 100%; height: 100%; display: block; }
+.sp-obs-ico--on {
+  color: #3ee04f;
+  filter: drop-shadow(0 0 6px rgba(62, 224, 79, 0.45));
 }
-.shift-chute.shift-chute--session {
-  height: 10px;
-  margin-top: 4px;
+[data-theme="light"] .sp-obs-ico--on {
+  color: #16a34a;
+  filter: none;
 }
-/* Spindle on/off read as green/red at a glance; warn keeps its emphasis. */
-.shift-panel-seg--on { color: #4ade80; }
-.shift-panel-seg--off { color: #f87171; }
-.shift-chute-future { display: none; }
+.sp-obs-row--on[data-spindle="on"] .sp-obs-ico--on svg {
+  animation: sp-obs-spin 5.5s linear infinite;
+}
+@keyframes sp-obs-spin { to { transform: rotate(360deg); } }
+.sp-obs-ico--off {
+  color: #f45c6c;
+  filter: drop-shadow(0 0 6px rgba(244, 92, 108, 0.42));
+}
+[data-theme="light"] .sp-obs-ico--off {
+  color: #e11d48;
+  filter: none;
+}
+.sp-obs-row--off.shift-panel-seg--warn .sp-obs-ico--off {
+  filter: drop-shadow(0 0 10px rgba(244, 92, 108, 0.72));
+}
 
+.sp-obs-val-group {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 1px clamp(5px, 1.5cqi, 8px);
+  min-width: 0;
+  line-height: 1.08;
+}
+.sp-obs-val {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.02rem, 5cqi, 1.46rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--sp-ink);
+  white-space: nowrap;
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+}
+.sp-obs-delta {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(0.74rem, 3.3cqi, 0.98rem);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sp-obs-delta:empty { display: none; }
+.sp-obs-delta--up { color: #4ade80; }
+.sp-obs-delta--down { color: #f45c6c; }
+.sp-obs-delta--flat { color: var(--sp-muted); }
+[data-theme="light"] .sp-obs-delta--up { color: #16a34a; }
+[data-theme="light"] .sp-obs-delta--down { color: #e11d48; }
 
+.sp-obs-sub {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: clamp(0.7rem, 2.9cqi, 0.9rem);
+  color: var(--sp-muted);
+  white-space: nowrap;
+}
 
-
-
-
-
-
-
-
-/* shift chute — the little 8h timeline bar: green running, red stopped, grey future (empty chute → slowly fills) */
+.sp-obs-session {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 1.2cqi, 6px);
+  min-width: 0;
+}
 .shift-chute {
   display: flex;
   height: 14px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(var(--mc-ink2), 0.08);
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.12);
+  background: var(--sp-chute-bg);
   margin-top: 0;
 }
-.shift-chute-running { background: #16a34a; transition: width 0.4s ease; min-width: 0; }
-.shift-chute-stopped { background: #ef4444; transition: width 0.4s ease; min-width: 0; }
-.shift-chute-future  { background: rgba(var(--mc-ink2), 0.12); transition: width 0.4s ease; min-width: 0; flex: 1 1 auto; }
-.shift-chute[hidden] { display:none !important; }
+.shift-chute.shift-chute--session {
+  height: clamp(5px, 1.5cqi, 7px);
+  gap: 2px;
+  margin-top: 0;
+  box-shadow: none;
+}
+.shift-chute-running {
+  background: var(--sp-arc-mid);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+.shift-chute-stopped {
+  background: var(--sp-arc-inner);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+.shift-chute-future { display: none; }
+.shift-chute[hidden] { display: none !important; }
+
+.sp-obs-sess-label {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(0.7rem, 3.1cqi, 0.92rem);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--sp-muted);
+  line-height: 1.1;
+}
+.sp-obs-sess-k { color: var(--sp-muted); font-weight: 600; letter-spacing: 0.04em; }
+.sp-obs-sess-on { color: var(--sp-ink); font-weight: 700; }
+.sp-obs-sess-sep { color: var(--sp-faint); }
+.sp-obs-sess-tot { color: var(--sp-muted); font-weight: 600; }
+
+.sp-obs-prev {
+  display: flex;
+  align-items: center;
+  gap: clamp(9px, 3.2cqi, 18px);
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.sp-obs-prev[hidden] { display: none; }
+.sp-obs-prev-item {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(4px, 1.3cqi, 6px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: nowrap;
+  min-width: 0;
+  font-family: var(--font-display);
+  line-height: 1;
+}
+.sp-obs-prev-art {
+  position: static;
+  flex: 0 0 auto;
+  width: clamp(16px, 4.6cqi, 23px);
+  height: clamp(16px, 4.6cqi, 23px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.sp-obs-prev-art.is-visible { opacity: 1; }
+.sp-obs-prev-art svg { width: 100%; height: 100%; margin: 0; display: block; }
+.sp-obs-prev-code {
+  font-weight: 800;
+  font-size: clamp(0.94rem, 4.6cqi, 1.42rem);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.sp-obs-prev-pct {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+  font-weight: 800;
+  font-size: clamp(1rem, 5cqi, 1.52rem);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.sp-obs-prev-item--s2 .sp-obs-prev-code,
+.sp-obs-prev-item--s2 .sp-obs-prev-pct { color: var(--sp-prev-s2); }
+.sp-obs-prev-item--s3 .sp-obs-prev-code,
+.sp-obs-prev-item--s3 .sp-obs-prev-pct { color: var(--sp-prev-s3); }
+
+/* Right column: compact tight-hugging concentric arcs + smaller circular hub */
+.sp-obs-right {
+  position: relative;
+  width: clamp(144px, 46cqi, 200px);
+  min-height: clamp(128px, 38cqi, 166px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.sp-obs-svg {
+  width: clamp(160px, 51cqi, 214px);
+  height: auto;
+  aspect-ratio: 198 / 166;
+  display: block;
+  overflow: visible;
+  flex-shrink: 0;
+  margin-left: -26px;
+}
+.sp-arc-track {
+  fill: none;
+  stroke: var(--sp-track);
+  stroke-width: 19;
+  stroke-linecap: round;
+}
+.sp-arc-fill {
+  fill: none;
+  stroke-width: 19;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.55s cubic-bezier(0.16, 1, 0.3, 1), stroke 0.35s ease, opacity 0.25s ease;
+}
+.sp-arc-fill--outer { stroke: var(--sp-arc-outer); }
+.sp-arc-fill--mid { stroke: var(--sp-arc-mid); }
+.sp-arc-fill--inner { stroke: var(--sp-arc-inner); }
+.sp-arc-fill[data-phase="morning"] { stroke: var(--sp-phase-morning); }
+.sp-arc-fill[data-phase="afternoon"] { stroke: var(--sp-phase-afternoon); }
+.sp-arc-fill[data-phase="night"] { stroke: var(--sp-phase-night); }
+
+.sp-arc-tip {
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  pointer-events: none;
+}
+.sp-arc-tip rect {
+  stroke: #0e1015;
+  stroke-width: 1.8;
+  transition: fill 0.35s ease;
+}
+[data-theme="light"] .sp-arc-tip rect {
+  stroke: #ffffff;
+}
+.sp-arc-tip--outer rect { fill: var(--sp-tip-outer); }
+.sp-arc-tip--mid rect { fill: var(--sp-tip-mid); }
+.sp-arc-tip--inner rect { fill: var(--sp-tip-inner); }
+.sp-arc-tip[data-phase="morning"] rect { fill: var(--sp-tip-morning); }
+.sp-arc-tip[data-phase="afternoon"] rect { fill: var(--sp-tip-afternoon); }
+.sp-arc-tip[data-phase="night"] rect { fill: var(--sp-tip-night); }
+.sp-arc-tip text {
+  fill: var(--sp-tip-ink);
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.sp-arc-tip--prev text {
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.sp-arc-hub-bg {
+  fill: var(--sp-hub-bg);
+  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.42));
+}
+[data-theme="light"] .sp-arc-hub-bg {
+  filter: drop-shadow(0 3px 10px rgba(15, 23, 42, 0.22));
+}
+.sp-arc-hub-code {
+  fill: var(--sp-hub-code);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+.sp-arc-hub-pct {
+  fill: var(--sp-hub-pct);
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.sp-arc-hub-parts {
+  fill: var(--sp-hub-code);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle phase icon micro-animations */
+.shift-art-on .art-cloud { animation: shift-drift 12s ease-in-out infinite; }
+.shift-art-on .art-rays { animation: shift-spin 24s linear infinite; transform-box: fill-box; transform-origin: center; }
+.shift-art-on .art-star { animation: shift-twinkle 3s ease-in-out infinite; }
+.shift-art-on .art-star--d2 { animation-delay: 1s; }
+.shift-art-on .art-star--d3 { animation-delay: 2s; }
+.shift-art-on .art-moon { animation: shift-breathe 5s ease-in-out infinite; }
+@keyframes shift-drift { 0%, 100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
+@keyframes shift-spin { to { transform: rotate(360deg); } }
+@keyframes shift-twinkle { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+@keyframes shift-breathe { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
+
+@container (max-width: 340px) {
+  .sp-obs-right { width: 132px; }
+  .sp-obs-svg { width: 150px; margin-left: -22px; }
+  .sp-obs-sub { flex-basis: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shift-art-on *,
+  .shift-vibe-on .shift-vibe *,
+  .sp-obs-row--on[data-spindle="on"] .sp-obs-ico--on svg,
+  .prog-tl-cur .prog-tl-dot { animation: none !important; }
+  .sp-arc-fill,
+  .sp-arc-tip,
+  .shift-chute-running,
+  .shift-chute-stopped { transition: none !important; }
+}
 
 /* sequence pulse marker on footer when progressing */
 .seq-live-dot {
@@ -1696,10 +1795,11 @@ html[data-summary="off"] #summaryChips { display: none; }
  * (CYCLE REMAINING %, bar, elapsed / left). One toggle, all of it. */
 html[data-summary="off"] .machine-card .prog-timeline,
 html[data-summary="off"] .machine-card .cycle-panel { display: none; }
+html[data-shifts="off"] .card-panel--bottom,
 html[data-shifts="off"] .shift-panel { display: none; }
 
-/* Shift art layers are absolute decoration: hiding never moves layout. */
-html[data-shift-art="off"] .shift-prev-art,
+/* Shift art layers: hide ambient glow and collapse decorative mini icons cleanly. */
+html[data-shift-art="off"] .shift-prev-art { display: none; }
 html[data-shift-art="off"] .shift-vibe { visibility: hidden; }
 
 /* Ranked PARTS affordance; the popover is a fixed overlay. */

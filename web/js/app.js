@@ -10,6 +10,9 @@
  * wins via localStorage. */
 const COLLECTOR_PORT = (typeof window !== "undefined" && window.__VMC_COLLECTOR_PORT__) || 9994;
 const DEFAULT_API = (() => {
+  if (typeof window !== "undefined" && window.__VMC_API_BASE__) {
+    return String(window.__VMC_API_BASE__).replace(/\/+$/, "");
+  }
   const h = (typeof location !== "undefined" && location.hostname) ? location.hostname : "127.0.0.1";
   return `http://${h}:${COLLECTOR_PORT}`;
 })();
@@ -745,32 +748,82 @@ function buildCard(m) {
             </div>
           </div>
           </div>
-          <div class="card-panel card-panel--bottom shift-vibe-on">
+          <div class="card-panel card-panel--bottom shift-vibe-on" data-f="shiftCard" data-shift-phase="morning">
           <div class="shift-vibe" data-f="shiftVibe"></div>
-          <div class="shift-panel" data-f="shiftPanel" hidden>
-            <div class="shift-panel-head">
-              <span class="shift-pill shift-pill--active" data-f="shiftLabel"></span>
-              <span class="shift-panel-parts" data-f="shiftParts"></span>
-            </div>
-            <div class="shift-panel-meta">
-              <span class="shift-panel-seg shift-panel-seg--on" data-f="shiftRunningWrap">SP ON <span class="sp-chip sp-chip--on" data-f="shiftRunning">—</span></span>
-              <span class="shift-panel-seg shift-panel-seg--off" data-f="shiftStoppedWrap">SP OFF <span class="sp-chip sp-chip--off" data-f="shiftStopped">—</span></span>
-            </div>
-            <div class="shift-chute" data-f="shiftChute" title="Shift timeline — green spindle on, red spindle off (IST 06/14/22)">
-              <span class="shift-chute-running" data-f="chuteRunning"></span>
-              <span class="shift-chute-stopped" data-f="chuteStopped"></span>
-            </div>
-            <div class="shift-prev shift-art-on" data-f="shiftPrev" hidden>
-              <span class="shift-prev-box" data-f="shiftBox1"><span class="shift-prev-art" data-f="shiftBox1Art"></span><span class="shift-prev-name" data-f="shiftBox1Name">SHIFT 01</span><span class="shift-prev-pct" data-f="shiftBox1Pct">—</span></span>
-              <span class="shift-prev-box" data-f="shiftBox2"><span class="shift-prev-art" data-f="shiftBox2Art"></span><span class="shift-prev-name" data-f="shiftBox2Name">SHIFT 02</span><span class="shift-prev-pct" data-f="shiftBox2Pct">—</span></span>
-              <span class="shift-prev-box shift-prev-box--current"><span class="shift-prev-art" data-f="shiftBoxCurArt"></span><span class="shift-prev-cur" data-f="shiftSessionBig">—</span></span>
-              <span class="shift-session-label" data-f="shiftSessionLabel">SESSION · <span class="sess-chip sess-chip--on" data-f="sessOn">—</span> OF <span class="sess-chip sess-chip--tot" data-f="sessTot">—</span></span>
-            </div>
-            <div class="shift-session" data-f="shiftSession">
-              <div class="shift-chute shift-chute--session" data-f="shiftSessionChute" title="Session spindle share: green ON, red OFF (IST)">
-                <span class="shift-chute-running" data-f="sessionRunning"></span>
-                <span class="shift-chute-stopped" data-f="sessionStopped"></span>
+          <div class="shift-panel sp-obs" data-f="shiftPanel" hidden>
+            <div class="sp-obs-left">
+              <div class="shift-panel-head sp-obs-head">
+                <span class="sp-obs-phase-ico shift-art-on" data-f="shiftPhaseIco" aria-hidden="true"></span>
+                <span class="sp-obs-title" data-f="shiftLabel">SHIFT 01 · Morning</span>
               </div>
+              <div class="sp-obs-metrics">
+                <div class="sp-obs-row sp-obs-row--on" data-f="shiftRunningWrap">
+                  <span class="sp-obs-ico sp-obs-ico--on" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+                      <polyline points="21 3 21 9 15 9"/>
+                      <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/>
+                    </svg>
+                  </span>
+                  <div class="sp-obs-val-group">
+                    <span class="sp-obs-val sp-chip--on" data-f="shiftRunning">—</span>
+                    <span class="sp-obs-delta" data-f="shiftDelta"></span>
+                    <span class="sp-obs-sub">Spindle ON</span>
+                  </div>
+                </div>
+                <div class="sp-obs-row sp-obs-row--off" data-f="shiftStoppedWrap">
+                  <span class="sp-obs-ico sp-obs-ico--off" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="9"/>
+                      <line x1="10" y1="8.8" x2="10" y2="15.2"/>
+                      <line x1="14" y1="8.8" x2="14" y2="15.2"/>
+                    </svg>
+                  </span>
+                  <div class="sp-obs-val-group">
+                    <span class="sp-obs-val sp-chip--off" data-f="shiftStopped">—</span>
+                    <span class="sp-obs-sub">Spindle OFF</span>
+                  </div>
+                </div>
+              </div>
+              <div class="sp-obs-session" data-f="shiftSession">
+                <div class="shift-chute shift-chute--session" data-f="shiftChute" title="Shift timeline — green spindle on, red spindle off (IST 06/14/22)">
+                  <span class="shift-chute-running" data-f="chuteRunning"></span>
+                  <span class="shift-chute-stopped" data-f="chuteStopped"></span>
+                </div>
+              </div>
+            </div>
+            <div class="sp-obs-right">
+              <svg class="sp-obs-svg" viewBox="0 0 198 166" role="img" aria-label="Shift utilization concentric arcs">
+                <g class="sp-arc-tracks">
+                  <path class="sp-arc-track sp-arc-track--outer" data-f="trackOuter" />
+                  <path class="sp-arc-track sp-arc-track--mid" data-f="trackMid" />
+                  <path class="sp-arc-track sp-arc-track--inner" data-f="trackInner" />
+                </g>
+                <g class="sp-arc-fills">
+                  <path class="sp-arc-fill sp-arc-fill--outer" data-f="arcOuter"><title data-f="arcOuterTitle"></title></path>
+                  <path class="sp-arc-fill sp-arc-fill--mid" data-f="arcMid"><title data-f="arcMidTitle"></title></path>
+                  <path class="sp-arc-fill sp-arc-fill--inner" data-f="arcInner"><title data-f="arcInnerTitle"></title></path>
+                </g>
+                <g class="sp-arc-tip sp-arc-tip--prev sp-arc-tip--outer" data-f="tipOuter" opacity="0">
+                  <rect x="-28" y="-10.5" width="56" height="21" rx="10.5" />
+                  <text text-anchor="middle" dominant-baseline="central" data-f="tipOuterVal"></text>
+                </g>
+                <g class="sp-arc-tip sp-arc-tip--mid" data-f="tipMid" opacity="0">
+                  <rect x="-26" y="-10" width="52" height="20" rx="10" />
+                  <text text-anchor="middle" dominant-baseline="central" data-f="tipMidVal"></text>
+                </g>
+                <g class="sp-arc-tip sp-arc-tip--prev sp-arc-tip--inner" data-f="tipInner" opacity="0">
+                  <rect x="-28" y="-10.5" width="56" height="21" rx="10.5" />
+                  <text text-anchor="middle" dominant-baseline="central" data-f="tipInnerVal"></text>
+                </g>
+                <g class="sp-arc-hub" data-f="shiftHub">
+                  <title data-f="shiftHubTitle"></title>
+                  <circle cx="154" cy="132" r="39" class="sp-arc-hub-bg" />
+                  <text x="153" y="107" text-anchor="middle" dominant-baseline="central" class="sp-arc-hub-code" data-f="shiftHubCode">S1</text>
+                  <text x="153" y="128" text-anchor="middle" dominant-baseline="central" class="sp-arc-hub-pct" data-f="shiftSessionBig">—</text>
+                  <text x="153" y="150" text-anchor="middle" dominant-baseline="central" class="sp-arc-hub-parts" data-f="shiftParts">— parts</text>
+                </g>
+              </svg>
             </div>
           </div>
           </div>
@@ -1005,11 +1058,17 @@ function updateShiftPanel(entry, m, progressing, fresh) {
   const parts = sh.parts ?? sh.part_count ?? sh.partCount ?? null;
   const shift = String(sh.shift ?? "").trim();
   const shiftWindow = shiftWindowLabel(shift, fromMs, shiftEnd);
-  const baseLabel = sh.label || (shift ? `SHIFT ${shift.padStart(2, "0")}` : "SHIFT");
-  const label = shiftWindow ? `${baseLabel} ${shiftWindow}` : baseLabel;
+  const shiftCode = shift ? shift.padStart(2, "0") : "01";
+  const phaseTitle = SHIFT_PHASE_LABEL[shiftCode] || "Morning";
+  const phaseKey = SHIFT_PHASE[shiftCode] || "morning";
+  const baseLabel = sh.label || `SHIFT ${shiftCode}`;
+  const label = `${baseLabel} · ${phaseTitle}`;
   const activeProgram = sh.active_program ?? sh.activeProgram ?? m.active_program ?? "";
   const machineId = m.machine_name || m.machine_id || "";
   if (refs.shiftPanel) refs.shiftPanel.hidden = false;
+  if (refs.shiftCard) setAttr(refs.shiftCard, "data-shift-phase", phaseKey);
+  if (refs.shiftHubCode) setText(refs.shiftHubCode, shortShiftTag(shiftCode));
+  if (refs.shiftPhaseIco) paintShiftArt(refs.shiftPhaseIco, shiftCode);
   const fmt = (ms) => ms == null || Number.isNaN(Number(ms)) ? "—" : fmtClockHHMMSS(Number(ms) / 1000);
   // from<=0 means "no window": Number(… ?? 0) yields a finite 0 that would
   // explode elapsed to ~55 years while the label mask hides it (roster
@@ -1031,7 +1090,7 @@ function updateShiftPanel(entry, m, progressing, fresh) {
     measuredRows: Number.isFinite(Number(sh.measured_rows)) ? Number(sh.measured_rows) : 0,
     truncated: sh.truncated === true || sh.truncated === 1 || sh.truncated === "true",
     parts: parts,
-    shift: shift,
+    shift: shiftCode,
     label: label,
     window: shiftWindow,
     activeProgram: activeProgram,
@@ -1041,6 +1100,7 @@ function updateShiftPanel(entry, m, progressing, fresh) {
     freshness: freshness.tier,
   };
   setText(refs.shiftLabel, label);
+  if (refs.shiftLabel && shiftWindow) setAttr(refs.shiftLabel, "title", `${label} (${shiftWindow} IST)`);
   setText(refs.shiftPill, label);
   setText(refs.shiftParts, parts != null && Number.isFinite(Number(parts)) ? `${fmtInt(parts)} parts` : "— parts");
   // Data-quality note: three of
@@ -1092,6 +1152,10 @@ function updateShiftPanel(entry, m, progressing, fresh) {
     if (spindleMoving) setAttr(refs.shiftRunning, "data-spindle", "on");
     else if (refs.shiftRunning.hasAttribute("data-spindle")) refs.shiftRunning.removeAttribute("data-spindle");
   }
+  if (refs.shiftRunningWrap) {
+    if (spindleMoving) setAttr(refs.shiftRunningWrap, "data-spindle", "on");
+    else if (refs.shiftRunningWrap.hasAttribute("data-spindle")) refs.shiftRunningWrap.removeAttribute("data-spindle");
+  }
   if (refs.shiftPill) setText(refs.shiftPill, label);
   ensurePrevSessions(entry, machineId);
   paintShift(entry);
@@ -1118,7 +1182,7 @@ function paintShift(entry) {
   if (!measured) {
     setText(refs.shiftRunning, "—");
     setText(refs.shiftStopped, "—");
-    if (refs.shiftStoppedWrap) refs.shiftStoppedWrap.className = "shift-panel-seg shift-panel-seg--off";
+    if (refs.shiftStoppedWrap) refs.shiftStoppedWrap.className = "sp-obs-row sp-obs-row--off";
     if (refs.chuteRunning) setWidth(refs.chuteRunning, 0);
     if (refs.chuteStopped) setWidth(refs.chuteStopped, 0);
     if (refs.shiftChute) {
@@ -1133,7 +1197,7 @@ function paintShift(entry) {
   const total = running + stopped;
   const warn = total > 0 && (stopped / total) > 0.5;
   if (refs.shiftStoppedWrap) {
-    const base = "shift-panel-seg shift-panel-seg--off";
+    const base = "sp-obs-row sp-obs-row--off";
     refs.shiftStoppedWrap.className = warn ? `${base} shift-panel-seg--warn` : base;
   }
   const runningPct = total > 0 ? Math.max(0, Math.min(100, (running / total) * 100)) : 0;
@@ -1204,13 +1268,14 @@ function ensurePrevSessions(entry, machineId) {
  * background layer that can never move layout or text. One-flag removal:
  * drop the shift-art-on class in the template and the row is today's row. */
 const SHIFT_PHASE = { "01": "morning", "02": "afternoon", "03": "night" };
+const SHIFT_PHASE_LABEL = { "01": "Morning", "02": "Afternoon", "03": "Night" };
 const SHIFT_ART = {
-  morning: `<svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><g class="art-rays" stroke="#fcd34d" stroke-width="3" stroke-linecap="round" opacity="0.9"><line x1="24" y1="6" x2="24" y2="11"/><line x1="12" y1="12" x2="15" y2="15.5"/><line x1="36" y1="12" x2="33" y2="15.5"/><line x1="6" y1="24" x2="11" y2="24"/><line x1="42" y1="24" x2="37" y2="24"/></g><circle cx="24" cy="30" r="9" fill="#fbbf24" opacity="0.95"/><rect x="9" y="30" width="30" height="3" rx="1.5" fill="#fbbf24" opacity="0.6"/></svg>`,
-  afternoon: `<svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><circle cx="21" cy="19" r="13" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.5"/><circle cx="21" cy="19" r="9" fill="#fbbf24" opacity="0.95"/><g class="art-cloud" fill="#fef3c7" opacity="0.8"><ellipse cx="31" cy="33" rx="7" ry="4.5"/><ellipse cx="26" cy="31" rx="5" ry="3.5"/><ellipse cx="35.5" cy="31" rx="4.5" ry="3"/></g></svg>`,
-  night: `<svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><g class="art-moon"><path transform="translate(4,6) scale(1.5)" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" fill="#e9edf6" opacity="0.95"/></g><g fill="#fde68a"><circle class="art-star" cx="38" cy="12" r="2.4"/><circle class="art-star art-star--d2" cx="33" cy="36" r="2"/><circle class="art-star art-star--d3" cx="41" cy="25" r="1.8"/></g></svg>`,
+  morning: `<svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><g class="art-rays" stroke="#fcd34d" stroke-width="3" stroke-linecap="round" opacity="0.95"><line x1="24" y1="6" x2="24" y2="11"/><line x1="12" y1="12" x2="15" y2="15.5"/><line x1="36" y1="12" x2="33" y2="15.5"/><line x1="6" y1="24" x2="11" y2="24"/><line x1="42" y1="24" x2="37" y2="24"/></g><circle cx="24" cy="30" r="9" fill="#fbbf24" opacity="0.95"/><rect x="9" y="30" width="30" height="3" rx="1.5" fill="#fbbf24" opacity="0.7"/></svg>`,
+  afternoon: `<svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><circle cx="21" cy="19" r="13" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.55"/><circle cx="21" cy="19" r="9" fill="#fbbf24" opacity="0.95"/><g class="art-cloud" fill="#fef3c7" opacity="0.88"><ellipse cx="31" cy="33" rx="7" ry="4.5"/><ellipse cx="26" cy="31" rx="5" ry="3.5"/><ellipse cx="35.5" cy="31" rx="4.5" ry="3"/></g></svg>`,
+  night: `<svg viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><g class="art-moon"><path transform="translate(4,6) scale(1.5)" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" fill="#a5b4fc" opacity="0.95"/></g><g fill="#fde68a"><circle class="art-star" cx="38" cy="12" r="2.4"/><circle class="art-star art-star--d2" cx="33" cy="36" r="2"/><circle class="art-star art-star--d3" cx="41" cy="25" r="1.8"/></g></svg>`,
 };
 function paintShiftArt(el, shift) {
-  if (!el || !dashPrefs.shiftArt) return;
+  if (!el) return;
   const phase = SHIFT_PHASE[String(shift || "").padStart(2, "0")] || "night";
   if (el.dataset.phase === phase) return;
   el.dataset.phase = phase;
@@ -1219,13 +1284,11 @@ function paintShiftArt(el, shift) {
   void el.offsetWidth;
   el.classList.add("is-visible");
 }
-/* Experimental whole-container vibe: the bottom panel carries the CURRENT
- * shift's sky (morning/afternoon/night) as an animated backdrop behind all
- * shift content. Same one-flag removal via shift-vibe-on in the template. */
+/* Subtle top-left phase glow behind the shift header (morning/afternoon/night). */
 const SHIFT_VIBE = {
-  morning: `<svg viewBox="0 0 400 220" preserveAspectRatio="xMaxYMin slice" aria-hidden="true"><defs><linearGradient id="vMorning" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f59e0b" stop-opacity="0"/><stop offset="0.55" stop-color="#f59e0b" stop-opacity="0.02"/><stop offset="1" stop-color="#fbbf24" stop-opacity="0.12"/></linearGradient></defs><rect width="400" height="220" fill="url(#vMorning)"/><g class="art-rays" stroke="#fcd34d" stroke-width="3" stroke-linecap="round" opacity="0.55"><line x1="378" y1="2" x2="378" y2="10"/><line x1="356" y1="12" x2="361" y2="18"/><line x1="394" y1="18" x2="399" y2="12"/></g><circle cx="378" cy="34" r="13" fill="#fbbf24" opacity="0.5"/><rect x="352" y="36" width="52" height="2.5" fill="#fbbf24" opacity="0.4"/></svg>`,
-  afternoon: `<svg viewBox="0 0 400 220" preserveAspectRatio="xMaxYMin slice" aria-hidden="true"><defs><linearGradient id="vAfternoon" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f59e0b" stop-opacity="0"/><stop offset="0.55" stop-color="#f59e0b" stop-opacity="0.02"/><stop offset="1" stop-color="#fcd34d" stop-opacity="0.12"/></linearGradient></defs><rect width="400" height="220" fill="url(#vAfternoon)"/><g class="art-rays" stroke="#fcd34d" stroke-width="2.5" stroke-linecap="round" opacity="0.5"><line x1="378" y1="7" x2="378" y2="13"/><line x1="378" y1="47" x2="378" y2="53"/><line x1="361" y1="30" x2="355" y2="30"/><line x1="395" y1="30" x2="401" y2="30"/><line x1="366" y1="18" x2="362" y2="14"/><line x1="390" y1="18" x2="394" y2="14"/><line x1="366" y1="42" x2="362" y2="46"/><line x1="390" y1="42" x2="394" y2="46"/></g><circle cx="378" cy="30" r="19" fill="none" stroke="#fcd34d" stroke-width="2" opacity="0.35"/><circle cx="378" cy="30" r="13" fill="#fcd34d" opacity="0.45"/></svg>`,
-  night: `<svg viewBox="0 0 400 220" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="vNight" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#6366f1" stop-opacity="0"/><stop offset="0.55" stop-color="#6366f1" stop-opacity="0.03"/><stop offset="1" stop-color="#a5b4fc" stop-opacity="0.12"/></linearGradient></defs><rect width="400" height="220" fill="url(#vNight)"/><g class="art-moon"><path transform="translate(332,22) scale(1.8)" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" fill="#e9edf6" opacity="0.6"/></g><g fill="#fde68a"><circle class="art-star" cx="312" cy="30" r="2.6"/><circle class="art-star art-star--d2" cx="292" cy="60" r="2.2"/><circle class="art-star art-star--d3" cx="330" cy="70" r="2"/><circle class="art-star" cx="272" cy="34" r="1.8"/></g></svg>`,
+  morning: `<svg viewBox="0 0 400 220" preserveAspectRatio="xMinYMin slice" aria-hidden="true"><defs><radialGradient id="vMorningGlow" cx="14%" cy="16%" r="52%"><stop offset="0%" stop-color="#f59e0b" stop-opacity="0.22"/><stop offset="55%" stop-color="#f59e0b" stop-opacity="0.06"/><stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/></radialGradient></defs><rect width="400" height="220" fill="url(#vMorningGlow)"/></svg>`,
+  afternoon: `<svg viewBox="0 0 400 220" preserveAspectRatio="xMinYMin slice" aria-hidden="true"><defs><radialGradient id="vAfternoonGlow" cx="14%" cy="16%" r="52%"><stop offset="0%" stop-color="#fbbf24" stop-opacity="0.20"/><stop offset="55%" stop-color="#fbbf24" stop-opacity="0.05"/><stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/></radialGradient></defs><rect width="400" height="220" fill="url(#vAfternoonGlow)"/></svg>`,
+  night: `<svg viewBox="0 0 400 220" preserveAspectRatio="xMinYMin slice" aria-hidden="true"><defs><radialGradient id="vNightGlow" cx="14%" cy="16%" r="52%"><stop offset="0%" stop-color="#6366f1" stop-opacity="0.24"/><stop offset="55%" stop-color="#6366f1" stop-opacity="0.07"/><stop offset="100%" stop-color="#6366f1" stop-opacity="0"/></radialGradient></defs><rect width="400" height="220" fill="url(#vNightGlow)"/></svg>`,
 };
 function paintShiftVibe(el, shift) {
   if (!el || !dashPrefs.shiftArt) return;
@@ -1237,101 +1300,223 @@ function paintShiftVibe(el, shift) {
   void el.offsetWidth;
   el.classList.add("is-visible");
 }
+
+function shortShiftTag(code) {
+  const n = parseInt(String(code || "1"), 10);
+  return Number.isFinite(n) ? `S${n}` : "S1";
+}
+
+/* Concentric bottom-right corner arc geometry (viewBox 0 0 198 166).
+ * Tight 3.5px gaps hugging the compact corner hub (cx=154, cy=132, r=39). */
+const ARC_CX = 154;
+const ARC_CY = 132;
+const ARC_END_DEG = 278;
+const ARC_SPECS = {
+  outer: { r: 97,   startDeg: 155.6, minFrac: 0.16 },
+  mid:   { r: 74.5, startDeg: 147.5, minFrac: 0.18 },
+  inner: { r: 52,   startDeg: 129.7, minFrac: 0.22 },
+};
+function polarPoint(r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: ARC_CX + r * Math.cos(rad), y: ARC_CY + r * Math.sin(rad) };
+}
+function arcPathD(r, startDeg, endDeg) {
+  const s = polarPoint(r, startDeg);
+  const e = polarPoint(r, endDeg);
+  const large = endDeg - startDeg > 180 ? 1 : 0;
+  return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
+}
+function arcLength(r, startDeg, endDeg) {
+  return (r * (endDeg - startDeg) * Math.PI) / 180;
+}
+function ensureArcTracks(entry) {
+  if (entry.arcInit) return;
+  const refs = entry.refs;
+  if (!refs || !refs.trackOuter) return;
+  entry.arcInit = true;
+  const pairs = [
+    ["outer", refs.trackOuter, refs.arcOuter],
+    ["mid", refs.trackMid, refs.arcMid],
+    ["inner", refs.trackInner, refs.arcInner],
+  ];
+  for (const [k, track, fill] of pairs) {
+    const sp = ARC_SPECS[k];
+    const d = arcPathD(sp.r, sp.startDeg, ARC_END_DEG);
+    const len = arcLength(sp.r, sp.startDeg, ARC_END_DEG);
+    if (track) setAttr(track, "d", d);
+    if (fill) {
+      setAttr(fill, "d", d);
+      setAttr(fill, "stroke-dasharray", len.toFixed(2));
+      setAttr(fill, "stroke-dashoffset", len.toFixed(2));
+    }
+  }
+}
+function setSingleArc(entry, key, fillEl, tipEl, tipValEl, titleEl, pct, titleText, shiftCode) {
+  const sp = ARC_SPECS[key];
+  const len = arcLength(sp.r, sp.startDeg, ARC_END_DEG);
+  const rounded = pct == null || !Number.isFinite(pct) ? null : Math.max(0, Math.min(100, Math.round(pct)));
+  const code = String(shiftCode || "01").padStart(2, "0");
+  const phase = SHIFT_PHASE[code] || "morning";
+  const shiftTag = shortShiftTag(code);
+  const sig = `${rounded}|${code}|${titleText || ""}`;
+  if (!entry.arcSig) entry.arcSig = {};
+  if (entry.arcSig[key] === sig) return;
+  entry.arcSig[key] = sig;
+
+  if (fillEl) setAttr(fillEl, "data-phase", phase);
+  if (tipEl) setAttr(tipEl, "data-phase", phase);
+  if (titleEl && titleText) setText(titleEl, titleText);
+  if (rounded == null || rounded <= 0) {
+    if (fillEl) {
+      setAttr(fillEl, "stroke-dashoffset", len.toFixed(2));
+      setAttr(fillEl, "opacity", "0");
+    }
+    if (tipEl) setAttr(tipEl, "opacity", "0");
+    return;
+  }
+  const frac = sp.minFrac + (1 - sp.minFrac) * (rounded / 100);
+  const offset = len * (1 - frac);
+  const tipDeg = sp.startDeg + (ARC_END_DEG - sp.startDeg) * frac;
+  const pt = polarPoint(sp.r, tipDeg);
+  if (fillEl) {
+    setAttr(fillEl, "opacity", "1");
+    setAttr(fillEl, "stroke-dashoffset", offset.toFixed(2));
+  }
+  if (tipEl) {
+    setAttr(tipEl, "opacity", "1");
+    setAttr(tipEl, "transform", `translate(${pt.x.toFixed(2)}, ${pt.y.toFixed(2)})`);
+  }
+  if (tipValEl) setText(tipValEl, `${shiftTag} ${rounded}%`);
+}
+
 function paintShiftBoxes(entry) {
   const refs = entry.refs; const prev = entry.prev;
   const truth = entry.shiftTruth;
-  if (!refs.shiftBox1) return;
-  refs.shiftPrev.hidden = false;
+  if (!refs.shiftPanel) return;
+  ensureArcTracks(entry);
+  if (refs.shiftPrev) refs.shiftPrev.hidden = false;
   const els = [refs.shiftBox1, refs.shiftBox2];
   const pcts = [refs.shiftBox1Pct, refs.shiftBox2Pct];
   const names = [refs.shiftBox1Name, refs.shiftBox2Name];
   const arts = [refs.shiftBox1Art, refs.shiftBox2Art];
-  // Previous two shifts only, chronological: e.g. current 01 paints 02, 03.
-  // The current shift has no box; its share reads big inside the session block.
+  // Previous two shifts chronologically: e.g. current 01 paints S2 (outer) and S3 (inner).
   const cur = (prev && prev.cur) || String((truth && truth.shift) || "").padStart(2, "0") || "01";
   const prevNum = (s) => (s === "01" ? "03" : s === "02" ? "01" : "02");
-  const p1 = prevNum(cur);
-  [prevNum(p1), p1].forEach((s, i) => {
+  const p1 = prevNum(cur); // immediately preceding shift -> inner arc
+  const p2 = prevNum(p1);  // shift before that -> outer arc
+  const ordered = [p2, p1];
+  const slotPcts = [null, null];
+  const slotTitles = ["", ""];
+  ordered.forEach((s, i) => {
     const el = els[i];
     const pctEl = pcts[i];
-    if (!el) return;
-    if (names[i]) setText(names[i], `SHIFT ${s}`);
-    paintShiftArt(arts[i], s);
-    el.classList.remove("shift-prev-box--active");
-    const show = (text, title) => { if (pctEl) setText(pctEl, text); setAttr(el, "title", title); };
+    if (names[i]) setText(names[i], shortShiftTag(s));
+    if (arts[i]) paintShiftArt(arts[i], s);
+    if (el) el.classList.remove("shift-prev-box--active");
+    const show = (text, title) => { if (pctEl) setText(pctEl, text); if (el) setAttr(el, "title", title); };
     const slot = prev && prev.boxes ? prev.boxes[s] : null;
-    if (!slot) { show("—", `SHIFT ${s}: no data yet`); return; }
-    if (slot.pct == null) { show("—", `SHIFT ${s}: unmeasured, no confident percentage`); return; }
-    show(`${Math.round(slot.pct)}%`, `SHIFT ${s}: spindle ON ${fmtClockHHMMSS(slot.on / 1000)} of ${fmtClockHHMMSS((slot.on + slot.off) / 1000)}`);
+    if (!slot) {
+      slotTitles[i] = `SHIFT ${s}: no data yet`;
+      show("—", slotTitles[i]);
+      return;
+    }
+    if (slot.pct == null) {
+      slotTitles[i] = `SHIFT ${s}: unmeasured, no confident percentage`;
+      show("—", slotTitles[i]);
+      return;
+    }
+    slotPcts[i] = slot.pct;
+    slotTitles[i] = `SHIFT ${s} (${SHIFT_PHASE_LABEL[s] || ""}): spindle ON ${fmtClockHHMMSS(slot.on / 1000)} of ${fmtClockHHMMSS((slot.on + slot.off) / 1000)} (${Math.round(slot.pct)}%)`;
+    show(`${Math.round(slot.pct)}%`, slotTitles[i]);
   });
-  paintShiftArt(refs.shiftBoxCurArt, cur);
+  entry.prevPcts = { p2: slotPcts[0], p1: slotPcts[1], p2Shift: p2, p1Shift: p1 };
+  setSingleArc(entry, "outer", refs.arcOuter, refs.tipOuter, refs.tipOuterVal, refs.arcOuterTitle, slotPcts[0], slotTitles[0], p2);
+  setSingleArc(entry, "inner", refs.arcInner, refs.tipInner, refs.tipInnerVal, refs.arcInnerTitle, slotPcts[1], slotTitles[1], p1);
+  paintShiftArt(refs.shiftPhaseIco, cur);
   paintShiftVibe(refs.shiftVibe, cur);
 }
 
-/* Continuous session fill for the current-shift box: the percentage melts from
- * red (0) through amber (50) to green (100) with the fill deepening as it
- * climbs — no separate steps, every percent its own shade. Written only when
- * the rounded values change; CSS transitions smooth the rest. */
-const SESS_STOPS = [[0, [248, 113, 113]], [50, [251, 191, 36]], [100, [74, 222, 128]]];
+/* Kept as lightweight helper for backwards-compat callers/tests; Style 1C uses
+ * the clean white-on-obsidian circular corner hub instead of a color-washed box. */
 function setSessFill(entry, pct) {
-  const box = entry.refs && entry.refs.shiftSessionBig
-    ? entry.refs.shiftSessionBig.closest(".shift-prev-box--current") : null;
+  const box = entry.refs && entry.refs.shiftHub ? entry.refs.shiftHub : null;
   if (!box) return;
   if (pct == null) {
     if (entry.sessFill == null) return;
     entry.sessFill = null;
     box.removeAttribute("data-sess");
-    box.style.removeProperty("--sess-rgb");
-    box.style.removeProperty("--sess-a");
-    box.style.removeProperty("--sess-ink");
     return;
   }
-  const p = Math.max(0, Math.min(100, pct));
-  let a = SESS_STOPS[0], b = SESS_STOPS[SESS_STOPS.length - 1];
-  for (let i = 0; i < SESS_STOPS.length - 1; i++) {
-    if (p >= SESS_STOPS[i][0] && p <= SESS_STOPS[i + 1][0]) { a = SESS_STOPS[i]; b = SESS_STOPS[i + 1]; break; }
-  }
-  const t = b[0] === a[0] ? 0 : (p - a[0]) / (b[0] - a[0]);
-  const rgb = [0, 1, 2].map((k) => Math.round(a[1][k] + (b[1][k] - a[1][k]) * t));
-  const alpha = (0.28 + (p / 100) * 0.6).toFixed(3);
-  const ink = p >= 78 ? "#04140b" : `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
-  const sig = `${rgb.join(",")}|${alpha}|${ink}`;
+  const p = Math.round(Math.max(0, Math.min(100, pct)));
+  const sig = String(p);
   if (entry.sessFill === sig) return;
   entry.sessFill = sig;
-  box.setAttribute("data-sess", "");
-  box.style.setProperty("--sess-rgb", rgb.join(", "));
-  box.style.setProperty("--sess-a", alpha);
-  box.style.setProperty("--sess-ink", ink);
+  box.setAttribute("data-sess", sig);
 }
+
 /* Session spindle share, painted every frame from the DISPLAYED on/off pair,
  * so it can never disagree with the card: SESSION = ON / (ON + OFF). Shown
  * only with measured, untruncated input — otherwise an em dash. */
 function paintSession(entry, running, stopped, fmt) {
   const refs = entry.refs; const truth = entry.shiftTruth;
-  if (!refs.shiftSessionLabel) return;
-  // The SESSION line lives inside the shift grid: keep the row visible — this
-  // painter renders the honest "—" state itself when there is nothing to show.
+  if (!refs.shiftSessionBig && !refs.shiftSessionLabel) return;
+  ensureArcTracks(entry);
   if (refs.shiftPrev) refs.shiftPrev.hidden = false;
   const ok = truth && truth.fromOk && truth.measuredRows > 0 && !truth.truncated;
   const total = running + stopped;
   const setBig = (t) => { if (refs.shiftSessionBig) setText(refs.shiftSessionBig, t); };
+  const curShift = String((truth && truth.shift) || "01").padStart(2, "0");
+  const curTag = shortShiftTag(curShift);
+  if (refs.shiftHubCode) setText(refs.shiftHubCode, curTag);
   if (ok && total > 0) {
-    const pct = Math.round((running / total) * 100);
+    const rawPct = (running / total) * 100;
+    const pct = Math.round(rawPct);
+    const hubTip = `${truth.label}: ${pct}% spindle ON (${fmt(running)} of ${fmt(total)})`;
     setBig(`${pct}%`);
-    setSessFill(entry, (running / total) * 100);
-    setText(refs.sessOn, fmtSessHM(running / 1000));
-    setText(refs.sessTot, fmtSessHM(total / 1000));
-    setAttr(refs.shiftSessionLabel, "title", `Session spindle share since shift start (${truth.label}${truth.window ? ` ${truth.window}` : ""})`);
-    if (refs.sessionRunning) setWidth(refs.sessionRunning, ((running / total) * 100).toFixed(2));
-    if (refs.sessionStopped) setWidth(refs.sessionStopped, (Math.max(0, 100 - (running / total) * 100)).toFixed(2));
+    setSessFill(entry, rawPct);
+    if (refs.shiftHubTitle) setText(refs.shiftHubTitle, hubTip);
+    setSingleArc(entry, "mid", refs.arcMid, refs.tipMid, refs.tipMidVal, refs.arcMidTitle, rawPct, hubTip, curShift);
+    // Live delta vs immediately previous shift (p1)
+    const p1Pct = entry.prevPcts && entry.prevPcts.p1 != null ? entry.prevPcts.p1 : null;
+    if (refs.shiftDelta) {
+      if (p1Pct != null && Number.isFinite(p1Pct)) {
+        const diff = Math.round(rawPct - p1Pct);
+        if (diff > 0) {
+          setText(refs.shiftDelta, `+${diff}%↑`);
+          setClass(refs.shiftDelta, "sp-obs-delta sp-obs-delta--up");
+        } else if (diff < 0) {
+          setText(refs.shiftDelta, `${diff}%↓`);
+          setClass(refs.shiftDelta, "sp-obs-delta sp-obs-delta--down");
+        } else {
+          setText(refs.shiftDelta, "0%");
+          setClass(refs.shiftDelta, "sp-obs-delta sp-obs-delta--flat");
+        }
+        setAttr(refs.shiftDelta, "title", `vs SHIFT ${entry.prevPcts.p1Shift} (${Math.round(p1Pct)}%)`);
+      } else {
+        setText(refs.shiftDelta, "");
+        setClass(refs.shiftDelta, "sp-obs-delta");
+      }
+    }
+    if (refs.sessOn) setText(refs.sessOn, fmtSessHM(running / 1000));
+    if (refs.sessTot) setText(refs.sessTot, fmtSessHM(total / 1000));
+    if (refs.shiftSessionLabel) setAttr(refs.shiftSessionLabel, "title", `Session spindle share since shift start (${truth.label}${truth.window ? ` ${truth.window}` : ""})`);
+    if (refs.sessionRunning) setWidth(refs.sessionRunning, rawPct.toFixed(2));
+    if (refs.sessionStopped) setWidth(refs.sessionStopped, (Math.max(0, 100 - rawPct)).toFixed(2));
   } else {
     const why = !truth || !truth.fromOk ? "no shift window"
       : truth.truncated ? "partial data" : "unmeasured";
+    const hubTip = `Session share withheld: ${why}`;
     setBig("—");
     setSessFill(entry, null);
-    setText(refs.sessOn, "—");
-    setText(refs.sessTot, "—");
-    setAttr(refs.shiftSessionLabel, "title", `Session share withheld: ${why}`);
+    if (refs.shiftHubTitle) setText(refs.shiftHubTitle, hubTip);
+    setSingleArc(entry, "mid", refs.arcMid, refs.tipMid, refs.tipMidVal, refs.arcMidTitle, null, hubTip);
+    if (refs.shiftDelta) {
+      setText(refs.shiftDelta, "");
+      setClass(refs.shiftDelta, "sp-obs-delta");
+    }
+    if (refs.sessOn) setText(refs.sessOn, "—");
+    if (refs.sessTot) setText(refs.sessTot, "—");
+    if (refs.shiftSessionLabel) setAttr(refs.shiftSessionLabel, "title", hubTip);
     if (refs.sessionRunning) setWidth(refs.sessionRunning, (0).toFixed(2));
     if (refs.sessionStopped) setWidth(refs.sessionStopped, (0).toFixed(2));
   }

@@ -1,0 +1,5 @@
+{
+  "name": "VMC Sequence Monitor",
+  "description": "Live zero-gap MTConnect dashboard for CNC machine sequences, KPIs, predictive maintenance, and TV wall board mode.",
+  "requestFramePermissions": []
+}

@@ -19,7 +19,8 @@ const API_BASE = () => {
   // LAN/Tailscale visitor doesn't hit their own 127.0.0.1. ⚙ override still wins.
   const h = (typeof location !== "undefined" && location.hostname) ? location.hostname : "127.0.0.1";
   const cp = (typeof window !== "undefined" && window.__VMC_COLLECTOR_PORT__) || 9994;
-  return (localStorage.getItem("vmc_api_base") || `http://${h}:${cp}`).replace(/\/+$/, "");
+  const def = (typeof window !== "undefined" && window.__VMC_API_BASE__) || `http://${h}:${cp}`;
+  return (localStorage.getItem("vmc_api_base") || def).replace(/\/+$/, "");
 };
 
 /* history values arrive newest-first; ts is in MICROSECONDS. */
