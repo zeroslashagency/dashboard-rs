@@ -1,0 +1,29 @@
+[package]
+name = "vmc-dashboard"
+version = "1.0.0"
+edition = "2021"
+description = "VMC Sequence Dashboard + TV Wall Board — native Rust port of the stdlib static server"
+
+[lib]
+name = "vmc_dashboard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vmc-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

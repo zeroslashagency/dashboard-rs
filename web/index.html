@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="VMC Sequence Monitor — live zero-gap MTConnect dashboard for CNC machine sequences, KPIs, and predictive maintenance." />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdn.plot.ly; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* http://*:9994 https://unpkg.com https://cdn.jsdelivr.net; worker-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self';" />
+  <title>VMC Sequence Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230b1120'/><circle cx='8' cy='8' r='4' fill='none' stroke='%2338bdf8' stroke-width='1.5'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Rajdhani:wght@500;600;700&display=swap" />
+  <link rel="stylesheet" href="css/cards.css?v=77" />
+  <link rel="stylesheet" href="css/godmode.css?v=32" />
+  <link rel="stylesheet" href="css/tv.css?v=9" />
+</head>
+<body>
+  <!-- TV wall board control host. Populated by tv.js and revealed on demand
+       (corner hotspot, or `s`); hidden on the wall by default.
+
+       This element must stay OUTSIDE <header class="topbar">. The kiosk skin
+       injected by kiosk.rs runs a MutationObserver that re-applies
+       display:none to `.godnav, .topbar .cfg-btn` on every DOM mutation and
+       never disconnects, so anything mounted inside the topbar (or carrying the
+       cfg-btn class) would be permanently and unkillably hidden.
+
+       The interval <select> that used to live here was removed rather than
+       fixed: its option values were 5000/10000/15000/30000 while tv.js's
+       parseInterval matched only 5/10/15/30, so every choice except Off fell
+       through to a hardcoded 10s while the UI redisplayed the saved value on
+       reload. tv.js now builds its own controls and accepts both value shapes. -->
+  <div class="tv-controls" id="tvControls" hidden></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1 class="topbar-title">VMC SEQUENCE MONITOR</h1>
+      <span class="topbar-sub"></span>
+    </div>
+    <div class="topbar-right">
+      <div class="summary-chips" id="summaryChips"></div>
+      <div class="conn" id="conn">
+        <span class="conn-dot" id="connDot"></span>
+        <span class="conn-text" id="connText">connecting…</span>
+      </div>
+      <button class="cfg-btn" id="themeBtn" title="Toggle card dark / light mode">☾</button>
+      <button class="cfg-btn" id="cfgBtn" title="Configure API endpoint">⚙</button>
+      <!-- Dashboard settings entry. New tv-cfg-btn class: the kiosk skin's
+           MutationObserver re-hides `.topbar .cfg-btn` forever, so cfg-btn here
+           would vanish on the wall; tv.css hides tv-cfg-btn on data-tv instead. -->
+      <button class="tv-cfg-btn" id="fsBtn" title="Enter fullscreen">⛶</button>
+      <button class="tv-cfg-btn" id="dashCfgBtn" title="Display and card settings">☰</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="machine-grid" id="machineGrid"></section>
+    <p class="empty-note" id="emptyNote" hidden>No machines reported by the collector.</p>
+  </main>
+
+  <!-- alert toast + log host (populated by alerts.js) -->
+  <div class="alert-toast-stack" id="alertToasts"></div>
+
+
+  <footer class="footbar">
+    <span id="updatedAt">—</span>
+    <span class="footbar-api" id="apiLabel"></span>
+  </footer>
+
+  <!-- Runtime config (collector port) injected by serve.py; keeps ports out of static JS. -->
+  <script src="/config.js"></script>
+  <script type="importmap">
+    { "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three-fallback": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    } }
+  </script>
+  <script type="module">
+    // Lazy three.js loader. The 3D tab is the only consumer and it is optional +
+    // lazy-mounted, so we do NOT pull ~600KB of WebGL lib on every page load.
+    // threed.js calls window.__vmcLoadThree() the first time the 3D tab opens;
+    // a CDN fallback + timeout keeps an air-gapped floor from hanging forever.
+    let threeStarted = false;
+    window.__vmcLoadThree = function () {
+      if (threeStarted || window.THREE) return;
+      threeStarted = true;
+      async function loadThree() {
+        try { return await import("three"); }
+        catch (_) { return await import("three-fallback"); }
+      }
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("three timeout")), 15000));
+      Promise.race([loadThree(), timeout])
+        .then((THREE) => { window.THREE = THREE; window.dispatchEvent(new Event("three-ready")); })
+        .catch(() => { window.__THREE_FAILED__ = true; window.dispatchEvent(new Event("three-failed")); });
+    };
+  </script>
+  <!-- tv-config.js must load BEFORE tv.js: it declares window.__VMC_TV_CFG__,
+       which tv.js reads at module scope. -->
+  <script src="js/tv-config.js?v=3"></script>
+  <script src="js/tv.js?v=7"></script>
+  <script src="js/aurora.js?v=32"></script>
+  <script src="js/app.js?v=63"></script>
+  <!-- God-mode modules: separate ES-module graph, never imported by app.js. -->
+  <script type="module" src="js/godmode.js?v=33"></script>
+
+</body>
+</html>
