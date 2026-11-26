@@ -10,28 +10,17 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Rajdhani:wght@500;600;700&display=swap" />
-  <link rel="stylesheet" href="css/cards.css?v=80" />
+  <link rel="stylesheet" href="css/cards.css?v=81" />
   <link rel="stylesheet" href="css/nc-folio.css?v=4" />
   <link rel="stylesheet" href="css/pw-frost.css?v=2" />
+  <link rel="stylesheet" href="css/parts-flap.css?v=2" />
   <link rel="stylesheet" href="css/godmode.css?v=33" />
+  <link rel="stylesheet" href="css/kpi-bento.css?v=1" />
   <link rel="stylesheet" href="css/status-pills.css?v=1" />
-  <link rel="stylesheet" href="css/tv.css?v=10" />
+  <link rel="stylesheet" href="css/tv.css?v=12" />
 </head>
 <body>
-  <!-- TV wall board control host. Populated by tv.js and revealed on demand
-       (corner hotspot, or `s`); hidden on the wall by default.
-
-       This element must stay OUTSIDE <header class="topbar">. The kiosk skin
-       injected by kiosk.rs runs a MutationObserver that re-applies
-       display:none to `.godnav, .topbar .cfg-btn` on every DOM mutation and
-       never disconnects, so anything mounted inside the topbar (or carrying the
-       cfg-btn class) would be permanently and unkillably hidden.
-
-       The interval <select> that used to live here was removed rather than
-       fixed: its option values were 5000/10000/15000/30000 while tv.js's
-       parseInterval matched only 5/10/15/30, so every choice except Off fell
-       through to a hardcoded 10s while the UI redisplayed the saved value on
-       reload. tv.js now builds its own controls and accepts both value shapes. -->
+  <!-- In-page TV Fullscreen control drawer host (populated on demand by tv.js). -->
   <div class="tv-controls" id="tvControls" hidden></div>
   <header class="topbar">
     <div class="topbar-left">
@@ -45,11 +34,7 @@
         <span class="conn-text" id="connText">connecting…</span>
       </div>
       <button class="cfg-btn" id="themeBtn" title="Toggle card dark / light mode">☾</button>
-      <button class="cfg-btn" id="cfgBtn" title="Configure API endpoint">⚙</button>
-      <!-- Dashboard settings entry. New tv-cfg-btn class: the kiosk skin's
-           MutationObserver re-hides `.topbar .cfg-btn` forever, so cfg-btn here
-           would vanish on the wall; tv.css hides tv-cfg-btn on data-tv instead. -->
-      <button class="tv-cfg-btn" id="fsBtn" title="Enter fullscreen">⛶</button>
+      <button class="tv-cfg-btn" id="fsBtn" title="Enter TV Fullscreen wall mode">⛶</button>
       <button class="tv-cfg-btn" id="dashCfgBtn" title="Display and card settings">☰</button>
     </div>
   </header>
@@ -97,14 +82,14 @@
   </script>
   <!-- tv-config.js must load BEFORE tv.js: it declares window.__VMC_TV_CFG__,
        which tv.js reads at module scope. -->
-  <script src="js/tv-config.js?v=3"></script>
-  <script src="js/tv.js?v=7"></script>
+  <script src="js/tv-config.js?v=5"></script>
+  <script src="js/tv.js?v=9"></script>
   <script src="js/aurora.js?v=32"></script>
   <script src="js/status-pills.js?v=1"></script>
   <script src="js/nc-folio.js?v=4"></script>
-  <script src="js/app.js?v=69"></script>
+  <script src="js/app.js?v=74"></script>
   <!-- God-mode modules: separate ES-module graph, never imported by app.js. -->
-  <script type="module" src="js/godmode.js?v=34"></script>
+  <script type="module" src="js/godmode.js?v=35"></script>
 
 </body>
 </html>

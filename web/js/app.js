@@ -59,31 +59,9 @@ const DASH_PREFS_DEFAULTS = {
   // Spindle row right side: false = RPM history graph, true = this machine's part count.
   spindleParts: false,
   previewSections: { summary: true, shifts: true },
-  // Fullscreen wall paging. perPage 0 = all cards on one page (no rotation).
-  // rotateMs 0 = hold the current page (no auto-switch). Only takes effect in
-  // dashboard fullscreen; the standalone 9995 wall board runs its own engine.
-  wallPerPage: 0,
-  wallRotateMs: 0,
-  // Preview Fullscreen — the presentation ("PPT") mode: cards only, an intro
-  // screen, and slide transitions on a timer. Its own settings so it can differ
-  // from the plain fullscreen wall above.
-  previewPerPage: 3,
-  previewRotateMs: 15000,
-  previewTransition: "fade",     // fade | slide | none
-  previewIntro: true,            // show the loading/intro screen on start
-  previewTitle: "VMC SEQUENCE MONITOR",
-  previewDots: true,             // deck-style page progress dots
-  // Whole-board scale for fullscreen/preview. 0 = auto (by viewport width).
-  boardZoom: 0,
 };
-const WALL_PER_PAGE_CHOICES = [0, 2, 3, 4, 6];
-const WALL_ROTATE_CHOICES = [0, 10000, 15000, 20000, 30000, 60000];
-const PREVIEW_PER_PAGE_CHOICES = [2, 3, 4, 6];
-const PREVIEW_ROTATE_CHOICES = [0, 10000, 15000, 20000, 30000, 60000];
-const PREVIEW_TRANSITION_CHOICES = ["fade", "slide", "none"];
-const BOARD_ZOOM_CHOICES = [0, 1, 1.25, 1.5, 1.75, 2];
-/* Which keys are booleans / enums / numbers, for validated sparse merges. */
-const PREF_BOOL_KEYS = ["shiftArt", "compactTimings", "rankedCounts", "spindleParts", "previewIntro", "previewDots"];
+/* Which keys are booleans, for validated sparse merges. */
+const PREF_BOOL_KEYS = ["shiftArt", "compactTimings", "rankedCounts", "spindleParts"];
 function freshDashPrefs() {
   return JSON.parse(JSON.stringify(DASH_PREFS_DEFAULTS));
 }
@@ -102,13 +80,6 @@ function sanitizePrefPatch(o) {
     }
     if (Object.keys(ps).length) p.previewSections = ps;
   }
-  if (WALL_PER_PAGE_CHOICES.indexOf(Number(o.wallPerPage)) !== -1) p.wallPerPage = Number(o.wallPerPage);
-  if (WALL_ROTATE_CHOICES.indexOf(Number(o.wallRotateMs)) !== -1) p.wallRotateMs = Number(o.wallRotateMs);
-  if (PREVIEW_PER_PAGE_CHOICES.indexOf(Number(o.previewPerPage)) !== -1) p.previewPerPage = Number(o.previewPerPage);
-  if (PREVIEW_ROTATE_CHOICES.indexOf(Number(o.previewRotateMs)) !== -1) p.previewRotateMs = Number(o.previewRotateMs);
-  if (PREVIEW_TRANSITION_CHOICES.indexOf(o.previewTransition) !== -1) p.previewTransition = o.previewTransition;
-  if (typeof o.previewTitle === "string") p.previewTitle = o.previewTitle.slice(0, 60);
-  if (BOARD_ZOOM_CHOICES.indexOf(Number(o.boardZoom)) !== -1) p.boardZoom = Number(o.boardZoom);
   return p;
 }
 function readScope(key) {
@@ -713,11 +684,15 @@ function buildCard(m) {
               <div class="ovr-pill" data-f="ovrSPill"><span class="ovr-pill-warn">⚠</span><span class="ovr-pill-key">S</span><span class="ovr-pill-val" data-f="ovrS"></span></div>
             </div>
           </div>
-          <div class="machine-card-box machine-card-box-parts">
+          <div class="machine-card-box machine-card-box-parts" data-led="idle">
             <canvas class="parts-water-canvas" data-f="partsWater"></canvas>
-            <div class="machine-card-box-label">PARTS</div>
+            <div class="sf-head">
+              <div class="machine-card-box-label" data-f="partsLabel">PARTS</div>
+              <span class="sf-led" aria-hidden="true"></span>
+            </div>
             <div class="machine-card-parts-row">
-              <div class="machine-card-box-value" data-f="parts"></div>
+              <div class="machine-card-box-value sf-sr-val" data-f="parts"></div>
+              <div class="sf-board" data-f="partsFlapBoard" data-cols="2" aria-hidden="true"></div>
             </div>
             <div class="machine-card-box-note" data-f="partsNote"></div>
           </div>
@@ -1044,49 +1019,13 @@ function updateCard(entry, m) {
   if (entry.spindleShown == null && entry.spindle.target != null) {
     entry.spindleShown = entry.spindle.target; // first sight: no roll, show truth
   }
-  // Parts count "floating-water" rise: tween the DISPLAY up to each new truth
-  // (easeOut) so a finished part glides in instead of snapping. paintParts owns
-  // refs.parts. On a job reset (count drops) we snap — never count backward.
-  const targetParts = Number(partCount);
-  // Number(null) is 0: the spindle-row readout only trusts a real value.
-  entry.partsKnown = partCount != null && partCount !== "" && Number.isFinite(targetParts);
-  if (Number.isFinite(targetParts)) {
-    if (entry.partsShown == null || targetParts < entry.partsShown) {
-      entry.partsShown = targetParts;          // first sight or reset -> show truth
-    }
-    entry.partsTarget = targetParts;
-    // Live part-finish stamp (1s poll cadence): a risen counter is a finished
-    // part right now. Feeds the celebration flash, the number pop, and the
-    // exact (non-approximate) row in the recent-parts strip.
-    if (entry.lastStampedN == null || targetParts < entry.lastStampedN) {
-      entry.lastStampedN = targetParts;        // first sight or reset -> new chain
-      entry.liveParts = [];
-      entry.partsDoneAt = 0;
-    } else if (targetParts > entry.lastStampedN) {
-      entry.lastStampedN = targetParts;
-      entry.partsDoneAt = Date.now();
-      (entry.liveParts || (entry.liveParts = [])).push({ n: targetParts, ts: Date.now(), approx: false });
-      if (entry.liveParts.length > 12) entry.liveParts.splice(0, entry.liveParts.length - 12);
-      bumpParts(refs.parts);
-    }
-  } else {
-    entry.partsTarget = null;
-    if (entry.partsShown == null) setText(refs.parts, "—");
-    // No count in this payload: the spindle-row readout shows "—", never a
-    // last-known or invented number.
-    setText(refs.spindlePartsVal, "—");
-  }
-  // Single timing under the count: when the shown number was reached. The live
-  // 1s poll stamps exact rises; history backfills the time from before this
-  // page opened. No extra section — just this line.
-  if (entry.lastPartHistAt == null) entry.lastPartHistAt = lastHistRiseAt(m.machine_id);
-  const lastPartAt = entry.partsDoneAt || entry.lastPartHistAt || 0;
-  const targetNote = m.target_part_qty ? `of ${fmtInt(m.target_part_qty)}` : "";
-  const agoNote = lastPartAt ? fmtAgo(Date.now() - lastPartAt) : "";
-  setText(refs.partsNote, targetNote && agoNote ? `${targetNote} · ${agoNote}` : (targetNote || agoNote));
-  if (refs.partsNote) refs.partsNote.title = lastPartAt ? `Last part finished ${fmtWallClock(lastPartAt)}` : "";
-  const partsBox = refs.parts ? refs.parts.closest(".machine-card-box-parts") : null;
-  if (partsBox) partsBox.classList.toggle("is-ranked", !!dashPrefs.rankedCounts);
+  // Per-program part count, FRONTEND-ONLY. History is seeded once per machine;
+  // after that this updates purely from the live overview poll (no repeated
+  // history requests). Counts only the CURRENT contiguous NC sequence, so the
+  // PARTS glass tile displays the current NC program's live part count.
+  updateProgParts(m.machine_id, m.active_program, partCount);
+  syncCardParts(entry, m, partCount);
+
   setText(refs.ovrF, fmtPct(ovr.feed));
   setText(refs.ovrR, fmtPct(ovr.rapid));
   setText(refs.ovrS, fmtPct(ovr.spindle));
@@ -1097,12 +1036,6 @@ function updateCard(entry, m) {
   setOvrWarn(refs.ovrSPill, ovr.spindle);
 
   setMode2(refs, m.controller_mode, m.execution);
-  // Per-program part count, FRONTEND-ONLY. History is seeded once per machine;
-  // after that this updates purely from the live overview poll (no repeated
-  // history requests). Counts only the CURRENT contiguous sequence, so it can
-  // never exceed the machine's own counter. The count feeds the jobs timeline
-  // and the PARTS popover; the old header program rows are gone.
-  updateProgParts(m.machine_id, m.active_program, partCount);
 
   // Store the cycle "truth" for the interpolator. The 60fps painter (paintCycle)
   // owns the live display fields (cycBig / bar / metaLeft / metaRight) and glides
@@ -1214,6 +1147,13 @@ function updateCard(entry, m) {
   entry.freezeLabel = freezeLabel;
   if (refs.pwPocket) setAttr(refs.pwPocket, "data-freeze", freezeMode);
   if (refs.frostStopLabel) setText(refs.frostStopLabel, freezeLabel);
+  const partsLedBox = refs.parts ? refs.parts.closest(".machine-card-box-parts") : null;
+  if (partsLedBox) {
+    const ledState = freezeMode === "pause"
+      ? "paused"
+      : (status === "running" && online ? "live" : "idle");
+    setAttr(partsLedBox, "data-led", ledState);
+  }
   updateShiftPanel(entry, m, progressing, fresh);
   updateToolpath(entry, m);
 }
@@ -1885,19 +1825,117 @@ function paintIdle(entry) {
 }
 
 
+/* Mechanical Split-Flap board renderer: builds 2+ hinged digit cards and
+ * triggers a kinetic 3D downward leaf flip strictly on digits that changed. */
+function makeFlapSlot(ch, muted) {
+  const slot = document.createElement("div");
+  slot.className = "sf-slot";
+  if (muted) slot.setAttribute("data-muted", "1");
+  slot.innerHTML =
+    `<div class="sf-card">` +
+      `<div class="sf-half sf-top"><span class="sf-glyph"></span></div>` +
+      `<div class="sf-half sf-bot"><span class="sf-glyph"></span></div>` +
+      `<div class="sf-half sf-leaf-top"><span class="sf-glyph"></span></div>` +
+      `<div class="sf-half sf-leaf-bot"><span class="sf-glyph"></span></div>` +
+      `<span class="sf-slit"></span>` +
+      `<span class="sf-hinge-l"></span>` +
+      `<span class="sf-hinge-r"></span>` +
+    `</div>`;
+  const gs = slot.querySelectorAll(".sf-glyph");
+  for (let i = 0; i < gs.length; i++) gs[i].textContent = ch;
+  return slot;
+}
+
+function renderSplitFlap(entry, numericVal, animate) {
+  const board = entry && entry.refs ? entry.refs.partsFlapBoard : null;
+  if (!board || typeof document === "undefined" || typeof board.appendChild !== "function") return;
+  // Guard minimal test stubs that don't implement real childNodes/querySelectorAll
+  if (board.__name) return;
+
+  const isDash = numericVal == null || !Number.isFinite(numericVal);
+  const chars = isDash
+    ? ["—", "—"]
+    : String(Math.max(0, Math.round(numericVal))).padStart(2, "0").split("");
+  const prev = entry.flapChars || null;
+
+  if (prev && prev.length === chars.length && prev.every((c, i) => c === chars[i])) return;
+
+  const cols = Math.min(5, Math.max(2, chars.length));
+  setAttr(board, "data-cols", String(cols));
+
+  let slots = board.querySelectorAll(".sf-slot");
+  if (!slots || slots.length !== chars.length) {
+    board.textContent = "";
+    for (let i = 0; i < chars.length; i++) {
+      board.appendChild(makeFlapSlot(chars[i], isDash));
+    }
+    entry.flapChars = chars.slice();
+    return;
+  }
+
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    const oldCh = prev ? prev[i] : ch;
+    const slot = slots[i];
+    if (isDash) slot.setAttribute("data-muted", "1");
+    else slot.removeAttribute("data-muted");
+    if (ch === oldCh) continue;
+
+    const topG = slot.querySelector(".sf-top .sf-glyph");
+    const botG = slot.querySelector(".sf-bot .sf-glyph");
+    const leafTopG = slot.querySelector(".sf-leaf-top .sf-glyph");
+    const leafBotG = slot.querySelector(".sf-leaf-bot .sf-glyph");
+
+    if (!animate || MOTION_REDUCED) {
+      if (topG) topG.textContent = ch;
+      if (botG) botG.textContent = ch;
+      if (leafTopG) leafTopG.textContent = ch;
+      if (leafBotG) leafBotG.textContent = ch;
+      slot.classList.remove("is-flipping");
+      continue;
+    }
+
+    // Stagger multi-digit flips right-to-left (ones -> tens -> hundreds)
+    const delayMs = (chars.length - 1 - i) * 45;
+    slot.style.setProperty("--sf-delay", `${delayMs}ms`);
+    if (topG) topG.textContent = ch;          // revealed behind folding top leaf
+    if (botG) botG.textContent = oldCh;       // stays on old digit until midpoint
+    if (leafTopG) leafTopG.textContent = oldCh;
+    if (leafBotG) leafBotG.textContent = ch;
+    slot.classList.remove("is-flipping");
+    void slot.offsetWidth;
+    slot.classList.add("is-flipping");
+
+    if (slot._sfTimer) clearTimeout(slot._sfTimer);
+    slot._sfTimer = setTimeout(() => {
+      if (botG) botG.textContent = ch;
+      slot.classList.remove("is-flipping");
+      slot._sfTimer = null;
+    }, delayMs + 420);
+  }
+  entry.flapChars = chars.slice();
+}
+
 /* Parts count-up tween. Glides the displayed integer toward the polled total
  * (easeOut ~12%/frame), snapping when within <0.5 so it lands on a clean int.
  * Reset (target below shown) is handled in updateCard, so here we only rise. */
 function paintParts(entry) {
   const refs = entry.refs;
   const target = entry.partsTarget;
-  if (target == null) return;
+  if (target == null) {
+    renderSplitFlap(entry, null, false);
+    return;
+  }
   if (entry.partsShown == null) entry.partsShown = target;
   const diff = target - entry.partsShown;
   if (Math.abs(diff) < 0.5) entry.partsShown = target;
   else entry.partsShown += diff * 0.12;
-  setText(refs.parts, fmtInt(entry.partsShown));
-  setText(refs.spindlePartsVal, entry.partsKnown ? fmtInt(entry.partsShown) : "—");
+  const rounded = Math.round(entry.partsShown);
+  setText(refs.parts, fmtInt(rounded));
+  setText(refs.spindlePartsVal, entry.partsKnown ? fmtInt(rounded) : "—");
+  const shouldAnim = !entry.flapNoAnim;
+  renderSplitFlap(entry, entry.partsKnown ? rounded : null, shouldAnim);
+  entry.flapNoAnim = false;
 }
 
 /* ---------- spindle RPM history trace ----------
@@ -2100,17 +2138,35 @@ function paintPartsWater(entry, dt) {
   }
 
   ctx.clearRect(0, 0, w, h);
-  if (level < 0.002) return;                                 // empty -> nothing to draw
 
-  const accent = entry.accentRGB || (entry.accentRGB = readAccent(entry.root));
-  if (!accent) return;              // card not yet in DOM — retry next frame
-  const [r, g, b] = accent;
-  const surfaceY = h * (1 - level);
-  const ampA = Math.min(6, h * 0.045) * (0.4 + 0.6 * Math.min(1, level * 2));
-  const ampB = ampA * 0.6;
+  // Refractive optical liquid wave: keeps a serene 22% luminous teal pool at
+  // rest so the Style 3 glass chamber stays alive, and rises smoothly to 100%
+  // with real active cycle progress.
+  const visualLevel = liveCycle ? (0.22 + level * 0.78) : 0.22;
+  const surfaceY = h * (1 - visualLevel);
+  const ampA = Math.min(6.5, h * 0.055) * (liveCycle ? (0.55 + 0.45 * Math.min(1, level * 2)) : 0.42);
+  const ampB = ampA * 0.55;
   const step = Math.max(3, Math.floor(w / 48));
 
-  // water body
+  // Secondary back-wave for luminous optical depth
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  ctx.lineTo(0, surfaceY + 2);
+  for (let x = 0; x <= w; x += step) {
+    const t = x / w;
+    const y = surfaceY + 2
+      + Math.sin(t * Math.PI * 2 * 1.15 - entry.waterPhase * 0.85 + 1.2) * (ampA * 0.85);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  const backGrad = ctx.createLinearGradient(0, surfaceY, 0, h);
+  backGrad.addColorStop(0, "rgba(45, 212, 191, 0.28)");
+  backGrad.addColorStop(1, "rgba(13, 148, 136, 0.14)");
+  ctx.fillStyle = backGrad;
+  ctx.fill();
+
+  // Primary translucent emerald-cyan optical liquid body
   ctx.beginPath();
   ctx.moveTo(0, h);
   ctx.lineTo(0, surfaceY);
@@ -2124,12 +2180,14 @@ function paintPartsWater(entry, dt) {
   ctx.lineTo(w, h);
   ctx.closePath();
   const grad = ctx.createLinearGradient(0, surfaceY, 0, h);
-  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.40)`);
-  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.16)`);
+  grad.addColorStop(0, "rgba(34, 211, 238, 0.52)");
+  grad.addColorStop(0.45, "rgba(20, 184, 166, 0.46)");
+  grad.addColorStop(1, "rgba(6, 95, 92, 0.34)");
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // bright meniscus riding the surface
+  // Glowing specular cyan-white optical meniscus riding the wave crest
+  ctx.save();
   ctx.beginPath();
   for (let x = 0; x <= w; x += step) {
     const t = x / w;
@@ -2138,40 +2196,40 @@ function paintPartsWater(entry, dt) {
       + Math.sin(t * Math.PI * 2 * 2.7 - entry.waterPhase * 1.4) * ampB;
     if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
-  ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.7)`;
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(165, 243, 252, 0.92)";
+  ctx.lineWidth = 2;
   ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(34, 211, 238, 0.85)";
+  ctx.shadowBlur = 10;
   ctx.stroke();
+  ctx.restore();
 
-  // Full stage: the whole box goes green under the number (text is flipped to
-  // dark ink by CSS so it stays readable in both themes).
+  // Full / part-completed celebration stage: radiant emerald-cyan optical surge
   if (stage === "full") {
     const full = ctx.createLinearGradient(0, 0, 0, h);
-    full.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.92)`);
-    full.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.78)`);
+    full.addColorStop(0, "rgba(52, 211, 153, 0.58)");
+    full.addColorStop(1, "rgba(20, 184, 166, 0.44)");
     ctx.fillStyle = full;
     roundRectPath(ctx, w, h, 0, 18);
     ctx.fill();
   }
 
-  // Hot/full stage: ONE minimal line — a faint static hairline as the track
-  // plus a single bright runner going around it. Under reduced-motion the
-  // runner parks and only the hairline shows.
+  // Hot/full stage: luminous cyan-mint perimeter trace runner
   if (stage === "hot" || stage === "full") {
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     roundRectPath(ctx, w, h, 3, 15);
-    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.35)`;
+    ctx.strokeStyle = "rgba(94, 234, 212, 0.38)";
     ctx.lineWidth = 1.5;
     ctx.stroke();
     if (!MOTION_REDUCED) {
       const total = rrTotal(w, h, 15, 3);
       const head = (entry.waterPhase || 0) * 120;
-      const len = total * 0.10;
-      ctx.strokeStyle = "rgba(240, 255, 244, 0.95)";
+      const len = total * 0.12;
+      ctx.strokeStyle = "rgba(236, 254, 255, 0.96)";
       ctx.lineWidth = 2.5;
-      ctx.shadowColor = `rgba(${r}, ${g}, ${b}, 0.9)`;
+      ctx.shadowColor = "rgba(52, 211, 153, 0.92)";
       ctx.shadowBlur = 12;
       ctx.beginPath();
       const N = 16;
@@ -2189,12 +2247,23 @@ function paintPartsWater(entry, dt) {
 const MOTION_REDUCED = typeof matchMedia === "function"
   && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/* Pop the PARTS number when a part finishes (transform-only: no layout move). */
+/* Flash the bezel LED & bump parts readout when a part finishes. */
 function bumpParts(el) {
   if (!el || !el.classList) return;
   el.classList.remove("is-bump");
   void el.offsetWidth;
   el.classList.add("is-bump");
+  const box = el.closest ? el.closest(".machine-card-box-parts") : null;
+  if (box && box.classList) {
+    box.classList.remove("is-clack");
+    void box.offsetWidth;
+    box.classList.add("is-clack");
+    if (box._clackTimer) clearTimeout(box._clackTimer);
+    box._clackTimer = setTimeout(() => {
+      box.classList.remove("is-clack");
+      box._clackTimer = null;
+    }, 650);
+  }
 }
 
 /* ms-epoch -> local HH:MM:SS wall clock. */
@@ -2203,6 +2272,14 @@ function fmtWallClock(ts) {
   if (Number.isNaN(d.getTime())) return "—";
   const p = (x) => String(x).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/* ms-epoch -> compact local HH:MM wall clock for card footers. */
+function fmtWallClockHM(ts) {
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (x) => String(x).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /* Counter history (jobs timeline counts + last-part timing). Haas reports
@@ -2867,13 +2944,43 @@ function bulkSeed() {
         if (entry) { paintProgTimeline(entry); entry.lastPartHistAt = lastHistRiseAt(machineId); }
         const res = seedFromHistory(progRows, cntRows);
         const cur = progCache.get(machineId) || {};
+        const liveProg = (entry && entry.lastM && entry.lastM.active_program) || cur.prog || "";
         cur.seeded = true;
         if (res) {
-          cur.prog = res.prog; cur.count = res.count;
-          cur.lastCounter = res.lastCounter; cur.startedAt = res.startedAt;
-          cur.prevProg = res.prevProg; cur.prevCount = res.prevCount;
+          if (!liveProg || liveProg === res.prog) {
+            const liveDelta = (cur.prog === res.prog && Number.isFinite(cur.lastCounter) && Number.isFinite(res.lastCounter) && cur.lastCounter > res.lastCounter)
+              ? (cur.lastCounter - res.lastCounter)
+              : 0;
+            cur.prog = res.prog;
+            cur.count = res.count + liveDelta;
+            cur.lastCounter = liveDelta > 0 ? cur.lastCounter : res.lastCounter;
+            cur.startedAt = res.startedAt;
+            cur.prevProg = res.prevProg;
+            cur.prevCount = res.prevCount;
+          } else {
+            // Operator switched programs live after the last history row; keep live count
+            cur.prevProg = res.prog;
+            cur.prevCount = res.count;
+          }
         }
         progCache.set(machineId, cur);
+        if (entry && entry.lastM) {
+          const pcRaw = entry.lastM.part_count_total ?? entry.lastM.part_count;
+          syncCardParts(entry, entry.lastM, pcRaw);
+          paintParts(entry);
+        }
+      }
+      // Mark any remaining live cards (with no prior history) as seeded too
+      for (const [machineId, entry] of cardEls.entries()) {
+        const cur = progCache.get(machineId);
+        if (cur && !cur.seeded) {
+          cur.seeded = true;
+          if (entry && entry.lastM) {
+            const pcRaw = entry.lastM.part_count_total ?? entry.lastM.part_count;
+            syncCardParts(entry, entry.lastM, pcRaw);
+            paintParts(entry);
+          }
+        }
       }
       scheduleHistRefresh();
     })
@@ -2883,6 +2990,80 @@ function bulkSeed() {
       // re-seeds a machine on its next program change. Allow a later retry.
       seedStarted = false;
     });
+}
+
+/* Sync the PARTS optical glass tile to the CURRENT active NC program's part
+ * count (seeded from history + live counter rises, resetting cleanly to 0 on
+ * NC program change), falling back to the machine counter when no active NC
+ * program is reported. */
+function syncCardParts(entry, m, partCount) {
+  if (!entry || !m) return;
+  const refs = entry.refs;
+  const rawCounter = Number(partCount);
+  const rawKnown = partCount != null && partCount !== "" && Number.isFinite(rawCounter);
+  const activeProg = String(m.active_program || "").trim();
+  const pc = m.machine_id ? progCache.get(m.machine_id) : null;
+  const hasNcCount = !!(activeProg && pc && pc.prog === activeProg && Number.isFinite(pc.count) && (pc.seeded || pc.count > 0));
+
+  // Track raw machine counter rises so every real finished part stamps partsDoneAt
+  // and fires the split-flap flip + LED pulse immediately.
+  if (rawKnown) {
+    if (entry.lastStampedN == null) {
+      entry.lastStampedN = rawCounter;
+      entry.liveParts = [];
+      entry.partsDoneAt = 0;
+    } else if (rawCounter < entry.lastStampedN) {
+      entry.lastStampedN = rawCounter;
+      entry.liveParts = [];
+      entry.partsDoneAt = 0;
+      entry.lastPartHistAt = 0;
+    } else if (rawCounter > entry.lastStampedN) {
+      entry.lastStampedN = rawCounter;
+      entry.partsDoneAt = Date.now();
+      (entry.liveParts || (entry.liveParts = [])).push({ n: rawCounter, ts: Date.now(), approx: false });
+      if (entry.liveParts.length > 12) entry.liveParts.splice(0, entry.liveParts.length - 12);
+      bumpParts(refs.parts);
+    }
+  }
+
+  // Choose display count: current NC program parts when active & known, else raw counter.
+  const displayKnown = hasNcCount ? true : rawKnown;
+  const displayTarget = hasNcCount ? pc.count : (rawKnown ? rawCounter : NaN);
+  const progChanged = entry.partsNcProg !== activeProg;
+  entry.partsNcProg = activeProg;
+  entry.partsKnown = displayKnown;
+
+  if (displayKnown && Number.isFinite(displayTarget)) {
+    if (entry.partsShown == null || progChanged || displayTarget < entry.partsShown) {
+      entry.partsShown = displayTarget; // first sight, NC switch, or reset -> snap cleanly
+      entry.flapNoAnim = true;
+    }
+    entry.partsTarget = displayTarget;
+  } else {
+    entry.partsTarget = null;
+    if (entry.partsShown == null) setText(refs.parts, "—");
+    setText(refs.spindlePartsVal, "—");
+    renderSplitFlap(entry, null, false);
+  }
+
+  // Label & dedicated etched footer: show last part change time (wall clock + elapsed).
+  setText(refs.partsLabel, hasNcCount ? "NC PARTS" : "PARTS");
+  if (entry.lastPartHistAt == null) entry.lastPartHistAt = lastHistRiseAt(m.machine_id);
+  const lastPartAt = entry.partsDoneAt || entry.lastPartHistAt || 0;
+  const agoNote = lastPartAt ? fmtAgo(Date.now() - lastPartAt) : "";
+  const hasValidLast = !!(lastPartAt && agoNote && agoNote !== "—");
+  const clockHM = hasValidLast ? fmtWallClockHM(lastPartAt) : "";
+  setText(refs.partsNote, hasValidLast ? `LAST ${clockHM} · ${agoNote}` : "LAST —");
+  if (refs.partsNote) {
+    const tipBits = [];
+    if (hasValidLast) tipBits.push(`Last part change: ${fmtWallClock(lastPartAt)} (${agoNote})`);
+    if (hasNcCount) tipBits.push(`Current NC: ${activeProg} (${fmtInt(displayTarget)} parts)`);
+    if (m.target_part_qty) tipBits.push(`Target: ${fmtInt(m.target_part_qty)}`);
+    if (rawKnown) tipBits.push(`Machine total: ${fmtInt(rawCounter)}`);
+    refs.partsNote.title = tipBits.join(" · ");
+  }
+  const partsBox = refs.parts ? refs.parts.closest(".machine-card-box-parts") : null;
+  if (partsBox) partsBox.classList.toggle("is-ranked", !!dashPrefs.rankedCounts);
 }
 
 /* Slow re-fetch of the same bulk payload so the jobs timeline stays fresh
@@ -3054,54 +3235,46 @@ function render(data) {
 
 }
 
-/* ---------- fullscreen: go to the dedicated wall page ----------
- * The wall is its OWN page, not an overlay stuffed into this one. `/tv` on this
- * same port serves the kiosk skin (kiosk.rs is_kiosk_path), where tv.js owns
- * paging, rotation, the wall settings panel and the exit control. Navigating
- * there instead of faking fullscreen in place is what keeps one board in one
- * place: a real URL you can bookmark, put in a shortcut, or type on the TV.
- *
- * Deliberately a navigation, not requestFullscreen(): the Fullscreen API needs
- * a user gesture, never survives a reload, and cannot give the TV a URL to boot
- * into. The wall page has its own "Full screen" button for the F11-style frame. */
+/* ---------- fullscreen: single-port in-page TV Wall Mode ----------
+ * Clicking ⛶ toggles in-page TV Fullscreen mode instantaneously via tv.js
+ * without reloading the page or losing live telemetry / WebGL contexts. */
 const TV_WALL_PATH = "/tv";
-function gotoWallBoard() {
+function enterTvFullscreen() {
+  closeDashCfg();
+  if (window.__VMC_TV_API__ && typeof window.__VMC_TV_API__.enter === "function") {
+    window.__VMC_TV_API__.enter({ fullscreen: true });
+    return;
+  }
   try { window.location.assign(window.location.origin + TV_WALL_PATH); }
   catch (_) { window.location.href = TV_WALL_PATH; }
 }
 function setupFullscreen() {
   const btn = document.getElementById("fsBtn");
   if (btn) {
-    btn.title = "Open the wall board (/tv)";
-    btn.addEventListener("click", gotoWallBoard);
+    btn.title = "Enter TV Fullscreen wall mode";
+    btn.addEventListener("click", () => {
+      closeDashCfg();
+      if (window.__VMC_TV_API__ && typeof window.__VMC_TV_API__.toggle === "function") {
+        window.__VMC_TV_API__.toggle({ fullscreen: true });
+      } else {
+        enterTvFullscreen();
+      }
+    });
   }
 }
 
-/* ---------- dashboard settings panel ----------
- * Display + card options + part counts. Per device (LS_DASH_PREFS); everything
- * applies to THIS page only — there is no cross-port preview and no writable
- * endpoint. Fixed overlay: opens from the topbar button and inside fullscreen;
- * Esc/backdrop closes. */
 /* ---------- shared settings sections ----------
- * Canonical Display + Machine cards + Profile sections, rendered with IDENTICAL
- * structure and wording in the dashboard panel (buildDashCfg below) and the
- * wall panel (tv.js buildPanel). One definition so the two panels can never
- * drift apart again. `cls` carries the panel's own theme classes:
- * dashboard passes {sec:"dash-cfg-sec",title:"dash-cfg-sec-t",row:"dash-cfg-row"},
- * wall passes {sec:"tv-panel-section",title:"tv-panel-section-title",row:"tv-panel-row"}.
- * Values flow through the adapter: eff() = merged effective prefs,
- * patch() = active-scope patch, set(key,val), after(kind) = repaint follow-up,
- * doExport()/doImport() = profile copy. Dotted keys address previewSections. */
-const DASH_SECTIONS_ZOOM_OPTS = '<option value="0">Auto</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="1.75">175%</option><option value="2">200%</option>';
+ * Canonical Card Toggles (Display sections + Machine cards), shared between
+ * the operator dashboard drawer and the in-page TV Fullscreen menu so every
+ * card control has one single source of truth. */
 function dashSectionsHTML(cls, only) {
   const want = (name) => !only || only.indexOf(name) !== -1;
   const S = (name, title, inner) =>
     `<div class="${cls.sec}" data-ss="${name}"><div class="${cls.title}">${title}</div>${inner}</div>`;
   let out = "";
   if (want("display")) out += S("display", "Display", `
-      <label class="${cls.row}"><input type="checkbox" data-dc="summary" /><span>Summary section</span></label>
-      <label class="${cls.row}"><input type="checkbox" data-dc="shifts" /><span>Shifts section</span></label>
-      <div class="${cls.row}"><label>Board scale</label><select data-dc="zoom">${DASH_SECTIONS_ZOOM_OPTS}</select></div>`);
+      <label class="${cls.row}"><input type="checkbox" data-dc="summary" /><span>Program wallet (Summary)</span></label>
+      <label class="${cls.row}"><input type="checkbox" data-dc="shifts" /><span>Shifts section</span></label>`);
   if (want("cards")) out += S("cards", "Machine cards", `
       <div class="${cls.row}"><label>Toolpath</label><select data-dc="toolpath">
         <option value="off">Off</option><option value="on">On</option></select></div>
@@ -3109,18 +3282,12 @@ function dashSectionsHTML(cls, only) {
       <label class="${cls.row}"><input type="checkbox" data-dc="compact" /><span>Compact timings</span></label>
       <label class="${cls.row}"><input type="checkbox" data-dc="ranked" /><span>Ranked part counts (last 5 programs)</span></label>
       <label class="${cls.row}"><input type="checkbox" data-dc="spindleParts" /><span>Part count instead of RPM graph</span></label>`);
-  if (want("profile")) out += S("profile", "Profile", `
-      <div class="${cls.row}"><span class="${cls.hint}">Global settings copy to another display by export → import.</span></div>
-      <div class="${cls.row} ${cls.btns}">
-        <button type="button" class="${cls.btn}" data-dc="export">Export…</button>
-        <button type="button" class="${cls.btn}" data-dc="import">Import…</button>
-      </div>`);
   return out;
 }
 function wireDashSections(root, cls, a) {
   const q = (k) => root.querySelector(`[data-dc="${k}"]`);
   const els = {
-    summary: q("summary"), shifts: q("shifts"), zoom: q("zoom"),
+    summary: q("summary"), shifts: q("shifts"),
     toolpath: q("toolpath"), art: q("art"), compact: q("compact"), ranked: q("ranked"),
     spindleParts: q("spindleParts"),
   };
@@ -3133,7 +3300,6 @@ function wireDashSections(root, cls, a) {
     const sub = (k) => (Object.prototype.hasOwnProperty.call(patchSub, k) ? patchSub[k] : effSub[k]);
     if (els.summary) els.summary.checked = !!sub("summary");
     if (els.shifts) els.shifts.checked = !!sub("shifts");
-    if (els.zoom) els.zoom.value = String(val("boardZoom") || 0);
     if (els.toolpath) els.toolpath.value = val("toolpath") === "on" ? "on" : "off";
     if (els.art) els.art.checked = !!val("shiftArt");
     if (els.compact) els.compact.checked = !!val("compactTimings");
@@ -3143,14 +3309,11 @@ function wireDashSections(root, cls, a) {
   const on = (el, ev, fn) => { if (el) el.addEventListener(ev, fn); };
   on(els.summary, "change", () => { a.set("previewSections.summary", els.summary.checked); a.after("dom"); sync(); });
   on(els.shifts, "change", () => { a.set("previewSections.shifts", els.shifts.checked); a.after("dom"); sync(); });
-  on(els.zoom, "change", () => { a.set("boardZoom", Number(els.zoom.value)); a.after("dom"); sync(); });
   on(els.toolpath, "change", () => { a.set("toolpath", els.toolpath.value === "on" ? "on" : "off"); a.after("card"); sync(); });
   on(els.art, "change", () => { a.set("shiftArt", els.art.checked); a.after("dom"); sync(); });
   on(els.compact, "change", () => { a.set("compactTimings", els.compact.checked); a.after("card"); sync(); });
   on(els.ranked, "change", () => { a.set("rankedCounts", els.ranked.checked); a.after("dom"); sync(); });
   on(els.spindleParts, "change", () => { a.set("spindleParts", els.spindleParts.checked); a.after("dom"); sync(); });
-  on(q("export"), "click", () => a.doExport());
-  on(q("import"), "click", () => a.doImport());
   sync();
   return { sync };
 }
@@ -3179,29 +3342,16 @@ function buildDashCfg() {
     <div class="dash-cfg-body">
     ${dashSectionsHTML(DCLS, ["display", "cards"])}
     <div class="dash-cfg-sec">
-      <div class="dash-cfg-sec-t">Wall board</div>
-      <div class="dash-cfg-hint">The wall is its own page at <code>/tv</code>. Slide time, paging, machines
-        and timeline are managed on the wall — those values live on that display.</div>
-      <button type="button" class="dash-cfg-btn dash-cfg-btn-wide" data-c="startPreview">⛶ Open wall board (/tv)</button>
-    </div>
-    <div class="dash-cfg-sec">
-      <div class="dash-cfg-sec-t">Machines &amp; order</div>
-      <div class="dash-cfg-hint">The wall fleet order and excludes live on the wall display.</div>
-      <button type="button" class="dash-cfg-btn dash-cfg-btn-wide" data-c="openWall">Manage on the wall (/tv)</button>
-    </div>
-    <div class="dash-cfg-sec">
-      <div class="dash-cfg-sec-t">Timeline step</div>
-      <div class="dash-cfg-hint">Range pinned: Hour · Follows wall machines · Timing set on the wall.</div>
-    </div>
-    <div class="dash-cfg-sec">
-      <div class="dash-cfg-sec-t">Collector</div>
+      <div class="dash-cfg-sec-t">Collector API</div>
       <div class="dash-cfg-row"><input type="text" data-c="api" spellcheck="false" /></div>
       <div class="dash-cfg-row dash-cfg-row-btns">
         <button type="button" class="dash-cfg-btn" data-c="apiApply">Apply</button>
       </div>
       <div class="dash-cfg-hint" data-c="apinote"></div>
     </div>
-    ${dashSectionsHTML(DCLS, ["profile"])}
+    <div class="dash-cfg-sec">
+      <button type="button" class="dash-cfg-btn dash-cfg-btn-wide" data-c="startPreview">⛶ Enter TV Fullscreen</button>
+    </div>
     </div>
     <div class="dash-cfg-foot">
       <button type="button" class="dash-cfg-btn dash-cfg-save" data-c="save">Done</button>
@@ -3216,13 +3366,11 @@ function buildDashCfg() {
     scopenote: q("scopenote"), note: q("note"),
     tabs: [].slice.call(panel.querySelectorAll(".dash-cfg-tab")),
   };
-  // Scope tabs decide which layer a change writes to. Device wins at render.
   els.tabs.forEach((tab) => tab.addEventListener("click", () => {
     dashScope = tab.dataset.scope === "device" ? "device" : "global";
     els.tabs.forEach((t) => t.classList.toggle("is-active", t === tab));
     syncDashCfgControls();
   }));
-  // Card/display rows are the SHARED sections (same markup as the wall panel).
   const dashAdapter = {
     eff: () => dashPrefs,
     patch: () => scopePatch(),
@@ -3236,16 +3384,10 @@ function buildDashCfg() {
       }
       updateScopeNote();
     },
-    doExport: () => exportDashProfile(),
-    doImport: () => importDashProfile(els.note),
   };
   const shared = wireDashSections(panel, DCLS, dashAdapter);
   els.shared = shared;
-  const goWall = () => { closeDashCfg(); gotoWallBoard(); };
-  q("startPreview").addEventListener("click", goWall);
-  q("openWall").addEventListener("click", goWall);
-  // Collector endpoint, inline. The old blocking prompt() is gone: walls have
-  // no keyboard and a modal boot-stopper is unacceptable there.
+  q("startPreview").addEventListener("click", enterTvFullscreen);
   els.api = q("api"); els.apinote = q("apinote");
   els.api.value = state.apiBase;
   const apiNote = (msg) => { if (els.apinote) els.apinote.textContent = msg; };
@@ -3261,8 +3403,6 @@ function buildDashCfg() {
   });
   q("save").addEventListener("click", closeDashCfg);
   q("reset").addEventListener("click", () => {
-    // Reset clears the ACTIVE scope only, so resetting "This display" falls back
-    // to global rather than wiping the whole install.
     try { localStorage.removeItem(scopeStoreKey()); } catch (_) {}
     resolveDashPrefs();
     applyPrefsToDom(); syncDashCfgControls(); applyCardPrefs();
@@ -3271,6 +3411,7 @@ function buildDashCfg() {
   backdrop.addEventListener("click", closeDashCfg);
   return els;
 }
+window.__VMC_CLOSE_DASH_CFG__ = closeDashCfg;
 function updateScopeNote() {
   const els = dashCfgEls;
   if (!els) return;
@@ -3929,13 +4070,10 @@ function setupDashOverlays() {
 
 /* ---------- config ---------- */
 function setupConfig() {
-  document.getElementById("apiLabel").textContent = state.apiBase;
-  // The gear opens settings (Collector section edits the endpoint inline).
-  // The old blocking prompt() is gone on purpose: wall boards have no
-  // keyboard, and a modal dialog stops the whole page.
-  document.getElementById("cfgBtn").addEventListener("click", () => {
-    openDashCfg();
-  });
+  const apiLabel = document.getElementById("apiLabel");
+  if (apiLabel) apiLabel.textContent = state.apiBase;
+  const cfgBtn = document.getElementById("cfgBtn");
+  if (cfgBtn) cfgBtn.addEventListener("click", () => openDashCfg());
 }
 
 /* ---------- card dark/light toggle ----------

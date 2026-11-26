@@ -156,6 +156,152 @@ export function kpiSeries(cycles, win, bins = 8) {
   return { pts, partsSlopePerH: partsSlope != null ? partsSlope * 3600000 : null, medSlopePerH: medSlope != null ? (medSlope * 3600000) / 1000 : null };
 }
 
+/* ---------- stacked throughput series by machine ----------
+ * Modes:
+ *   "bins" — 12 equal time buckets spanning [win.from, win.to]
+ *   "hour" — 24 local hours of day (0..23)
+ *   "day"  — chronological local calendar days present in the cycles
+ * Returns { cols: [{ label, fullLabel, total, median, byMachine: [{id,name,count,median}] }], maxTotal, peakIdx }. */
+export function stackedSeries(cycles, machines, win, mode = "bins") {
+  const mList = (machines || []).map((m) => ({
+    id: String(m.id || m.machine_id || "").toUpperCase(),
+    name: m.name || m.machine_name || m.machine_id || "",
+  })).filter((m) => m.id);
+  const nameById = new Map(mList.map((m) => [m.id, m.name]));
+
+  const cols = [];
+  if (mode === "hour") {
+    for (let h = 0; h < 24; h++) {
+      const ap = h < 12 ? "a" : "p";
+      const hr = h % 12 === 0 ? 12 : h % 12;
+      cols.push({
+        key: String(h),
+        label: h % 2 === 0 ? `${hr}${ap}` : "",
+        fullLabel: `${String(h).padStart(2, "0")}:00 – ${String((h + 1) % 24).padStart(2, "0")}:00`,
+        durs: [],
+        map: new Map(),
+      });
+    }
+    for (const c of cycles) {
+      const h = new Date(c.end).getHours();
+      const col = cols[h];
+      if (!col) continue;
+      const id = String(c.machine || "").toUpperCase();
+      col.durs.push(c.dur);
+      if (!col.map.has(id)) col.map.set(id, []);
+      col.map.get(id).push(c.dur);
+    }
+  } else if (mode === "day") {
+    const dayMap = new Map();
+    for (const c of cycles) {
+      const dk = dayKey(c.end);
+      if (!dayMap.has(dk)) {
+        dayMap.set(dk, {
+          key: dk,
+          label: dayLabel(dk).replace(/,.*/, ""),
+          fullLabel: `${weekdayName(dk)}, ${dayLabel(dk)}`,
+          durs: [],
+          map: new Map(),
+        });
+      }
+      const col = dayMap.get(dk);
+      const id = String(c.machine || "").toUpperCase();
+      col.durs.push(c.dur);
+      if (!col.map.has(id)) col.map.set(id, []);
+      col.map.get(id).push(c.dur);
+    }
+    const keys = [...dayMap.keys()].sort();
+    for (const k of keys) cols.push(dayMap.get(k));
+  } else {
+    const N = 12;
+    const span = Math.max(1, (win.to - win.from) || 1);
+    const step = span / N;
+    const shortSpan = span <= 36 * 3600000;
+    for (let i = 0; i < N; i++) {
+      const t0 = win.from + step * i;
+      const t1 = win.from + step * (i + 1);
+      const d0 = new Date(t0);
+      const d1 = new Date(t1);
+      const label = shortSpan
+        ? d0.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+        : d0.toLocaleDateString([], { month: "short", day: "numeric" });
+      const fullLabel = shortSpan
+        ? `${d0.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })} – ${d1.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`
+        : `${d0.toLocaleDateString([], { month: "short", day: "numeric" })} ${d0.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+      cols.push({ key: String(i), label, fullLabel, durs: [], map: new Map() });
+    }
+    for (const c of cycles) {
+      let idx = Math.floor((c.end - win.from) / step);
+      if (idx < 0) idx = 0;
+      if (idx >= N) idx = N - 1;
+      const col = cols[idx];
+      const id = String(c.machine || "").toUpperCase();
+      col.durs.push(c.dur);
+      if (!col.map.has(id)) col.map.set(id, []);
+      col.map.get(id).push(c.dur);
+    }
+  }
+
+  let maxTotal = 0;
+  let peakIdx = 0;
+  const out = cols.map((col, idx) => {
+    const total = col.durs.length;
+    if (total > maxTotal) {
+      maxTotal = total;
+      peakIdx = idx;
+    }
+    const byMachine = [];
+    for (const m of mList) {
+      const arr = col.map.get(m.id);
+      if (!arr || !arr.length) continue;
+      byMachine.push({ id: m.id, name: m.name, count: arr.length, median: stats(arr).median });
+    }
+    // Include any cycle machine not in mList
+    for (const [id, arr] of col.map) {
+      if (!nameById.has(id) && arr.length) {
+        byMachine.push({ id, name: id, count: arr.length, median: stats(arr).median });
+      }
+    }
+    return {
+      key: col.key,
+      label: col.label,
+      fullLabel: col.fullLabel,
+      total,
+      median: total ? stats(col.durs).median : null,
+      byMachine,
+    };
+  });
+
+  return { cols: out, maxTotal, peakIdx };
+}
+
+/* ---------- Fleet execution-state time mix ----------
+ * Aggregates dwell buckets across the given perMachine entries. */
+export function timeMixSummary(perMachine) {
+  const sums = { run: 0, pause: 0, idle: 0, alarm: 0, offline: 0 };
+  for (const pm of perMachine || []) {
+    const b = pm && pm.x && pm.x.buckets;
+    if (!b) continue;
+    sums.run += b.run || 0;
+    sums.pause += b.pause || 0;
+    sums.idle += b.idle || 0;
+    sums.alarm += b.alarm || 0;
+    sums.offline += b.offline || 0;
+  }
+  const total = sums.run + sums.pause + sums.idle + sums.alarm + sums.offline;
+  const pct = (v) => (total > 0 ? (v / total) * 100 : 0);
+  return {
+    totalMs: total,
+    items: [
+      { id: "run", label: "Cutting", ms: sums.run, pct: pct(sums.run), color: "#22c55e" },
+      { id: "pause", label: "Paused", ms: sums.pause, pct: pct(sums.pause), color: "#f59e0b" },
+      { id: "idle", label: "Idle / Setup", ms: sums.idle, pct: pct(sums.idle), color: "#3b82f6" },
+      { id: "alarm", label: "Alarm / E-Stop", ms: sums.alarm, pct: pct(sums.alarm), color: "#f43f5e" },
+      { id: "offline", label: "Offline", ms: sums.offline, pct: pct(sums.offline), color: "#64748b" },
+    ],
+  };
+}
+
 /* ---------- helpers ---------- */
 export function dayKey(ms) {
   const d = new Date(ms);

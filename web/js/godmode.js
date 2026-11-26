@@ -28,7 +28,7 @@ const REFRESH_MS = 15000;
  * module; `window:true` shows the Shift/24h/7d selector for that view. */
 const TABS = [
   { id: "dashboard", label: "Dashboard", grid: true },
-  { id: "kpi", label: "KPI", builder: mountKpi, window: true, title: "KPI Scorecard", sub: "scorecard · programs · timing · trends — the KPI from every angle, all from real cycles" },
+  { id: "kpi", label: "KPI", builder: mountKpi, window: true, title: "KPI Overview", sub: "fleet OEE · stacked throughput · time mix · program drift" },
   { id: "analytics", label: "Analytics", builder: mountAnalytical, window: true, title: "Data Science · Analytical", sub: "what happened and why — every metric gapless-audited" },
   { id: "threed", label: "3D", builder: mountThreeD, window: false, title: "Toolpath Theatre", sub: "live traced cutting path · overlay machines — all from real XYZ, current cycle" },
   { id: "timeline", label: "Timeline", builder: mountTimeline, window: false, title: "Production Timeline", sub: "" },

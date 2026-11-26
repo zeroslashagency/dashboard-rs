@@ -1,44 +1,57 @@
-/* VMC God-mode — KPI Scorecard console.
+/* VMC God-mode — Fresh Multi-Color Analytical Bento KPI Console.
  *
- * Not one headline number but the KPI from every angle, all from real cycles:
- *
- *   Scorecard — fleet gauges (OEE / Availability / Performance / Utilization) with
- *               trend vs the previous equal window, per-machine OEE ladder, and a
- *               scrollable readout (best/worst machine, parts, run hours).
- *   Programs  — every job that ran: parts, median cycle, consistency, best-case
- *               cycle, production share, and SAME PROGRAM across the two halves of
- *               the window (how each job reacted — faster or slower).
- *   Timing    — day × hour throughput heatmap, BEST DAY and PEAK HOUR call-outs,
- *               hourly profile and daily bars.
- *   Trends    — are we improving? parts/cycle Theil-Sen slopes over the window,
- *               per-machine OEE ladder deltas, fleet verdict.
- *
- * Same architecture as the Maintenance console: lazy sub-views, a monotonic token
- * guard so the 15s router refresh can't strand a stale async render, hover
- * info-boxes, and a scrollable analytical readout. Read-only over dataLayer.
+ * Unified single-page analytical bento built 100% from real MTConnect cycles,
+ * rstat execution segments, and M30 part counts:
+ *   1. 5-KPI Executive Summary Strip (OEE-lite, Availability, Performance, Utilization, Parts)
+ *   2. Hero Stacked Bar Overview (Time Bins | By Hour | By Day) with spotlight & floating tooltip
+ *   3. 3-Column Bento: Diagonal-Striped Machine Bars · Time Mix Stadium Ring & Trend Cadence · Active Programs
+ *   4. Switchable Deep-Dive: Radial-Ring Fleet Scorecard Table | Day × Hour Throughput Heatmap
  */
 
 import {
   fleetBundle, fleetKpis, byProgram, programPeriods, byDay, byHour,
-  dayHourMatrix, kpiSeries, fmtSec, dayKey, dayLabel, weekdayName,
+  dayHourMatrix, kpiSeries, stackedSeries, timeMixSummary,
+  fmtSec, dayLabel, weekdayName,
 } from "./kpiCore.js";
 import { initTooltips, tipAttr } from "./tooltip.js";
 
-const SUBVIEWS = [
-  { id: "scorecard", label: "Scorecard" },
-  { id: "programs", label: "Programs" },
-  { id: "timing", label: "Timing" },
-  { id: "trends", label: "Trends" },
+const LS_KPI_SNAP = "vmc_kpi_snap_v2";
+const MACHINE_PALETTE = [
+  "#3b82f6", // Cobalt
+  "#f472b6", // Rose
+  "#22c55e", // Emerald
+  "#f59e0b", // Amber
+  "#8b5cf6", // Violet
+  "#06b6d4", // Cyan
+  "#fb7185", // Coral
+  "#84cc16", // Lime
 ];
-const SUB_KEY = "vmc_kpi_sub";
-const LS_KPI_SNAP = "vmc_kpi_snap_v1";   // device-persisted last render per (sub,window)
+const PROGRAM_PALETTE = ["#3b82f6", "#22c55e", "#f59e0b", "#f472b6", "#8b5cf6", "#06b6d4"];
 
-const fmtPct = (v) => (v == null ? "—" : `${Math.round(v)}%`);
-const oeeClass = (v) => (v == null ? "" : v >= 70 ? "tone-good" : v >= 45 ? "tone-warn" : "tone-bad");
+const fmtPct = (v) => (v == null || !isFinite(v) ? "—" : `${v.toFixed(1).replace(/\.0$/, "")}%`);
+const fmtPctInt = (v) => (v == null || !isFinite(v) ? "—" : `${Math.round(v)}%`);
 
-// ---- device snapshot: persist the last good rendered HTML per (sub-view,window)
-// so a cold reload or tab re-entry paints INSTANTLY, then refreshes silently.
-function kpiSnapKey(sub, win) { return `${sub}|${win.key}`; }
+function fmtHours(ms) {
+  if (!ms || ms <= 0) return "0m";
+  const hrs = ms / 3600000;
+  if (hrs >= 10) return `${hrs.toFixed(0)}h`;
+  if (hrs >= 1) return `${hrs.toFixed(1)}h`;
+  return `${Math.max(1, Math.round(ms / 60000))}m`;
+}
+
+function deltaInfo(now, was, unit = "pts", invertGood = false) {
+  if (now == null || was == null) return { text: "", cls: "is-flat" };
+  const d = now - was;
+  if (Math.abs(d) < 0.05) return { text: "0", cls: "is-flat" };
+  const up = d > 0;
+  const good = invertGood ? !up : up;
+  const valStr = unit === "parts" ? String(Math.abs(Math.round(d))) : `${Math.abs(d).toFixed(1)} ${unit}`;
+  return {
+    text: `${up ? "▲" : "▼"} ${up ? "+" : "-"}${valStr}`,
+    cls: good ? "is-up" : "is-down",
+  };
+}
+
 function loadKpiSnap() {
   try {
     const raw = localStorage.getItem(LS_KPI_SNAP);
@@ -47,96 +60,236 @@ function loadKpiSnap() {
     return o && typeof o === "object" ? o : {};
   } catch (_) { return {}; }
 }
+
 function saveKpiSnap(map) {
   try {
     const json = JSON.stringify(map);
-    if (json.length > 2_500_000) return;   // device-quota safety
+    if (json.length > 2_000_000) return;
     localStorage.setItem(LS_KPI_SNAP, json);
-  } catch (_) { /* private mode / quota — non-fatal */ }
+  } catch (_) {}
 }
 
 export function mountKpi(body, dataLayer) {
-  let sub = localStorage.getItem(SUB_KEY) || "scorecard";
-  if (!SUBVIEWS.some((s) => s.id === sub)) sub = "scorecard";
-
   body.innerHTML = `
-    <div class="mt-subnav" data-f="subnav"></div>
-    <div class="mt-view" data-f="view"></div>
+    <div class="kb-root" data-f="root"></div>
     <p class="ds-note" data-f="note" role="status" aria-live="polite" hidden></p>`;
   const refs = {};
   body.querySelectorAll("[data-f]").forEach((n) => { refs[n.dataset.f] = n; });
   initTooltips(body);
 
-  for (const s of SUBVIEWS) {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "mt-subnav-btn"; b.dataset.sub = s.id; b.textContent = s.label;
-    b.addEventListener("click", () => { sub = s.id; localStorage.setItem(SUB_KEY, s.id); syncNav(); refresh(); });
-    refs.subnav.appendChild(b);
-  }
-  function syncNav() {
-    refs.subnav.querySelectorAll(".mt-subnav-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.sub === sub));
-  }
-  syncNav();
-
-  // device-persisted last render, keyed by (sub,window) — paint instantly on
-  // entry/reload, then recompute in the background and swap in fresh HTML.
   const snapMap = loadKpiSnap();
   let token = 0;
 
-  // paint a cached HTML body for the active (sub,window) if we have one, so the
-  // user never stares at "Computing…" on a tab switch or cold reload.
+  // Interactive UI state (zero-network instant updates)
+  const ui = {
+    chartMode: "bins",      // "bins" | "hour" | "day"
+    selectedMachine: null,  // null | uppercase machine ID
+    activeBarIdx: null,     // null -> defaults to peak column
+    bottomTab: "audit",     // "audit" | "heatmap"
+  };
+
+  let lastData = null;      // { curB, prevB, win, span, colorMap }
+
+  function assignColors(perMachine) {
+    const map = new Map();
+    const sortedIds = perMachine.map((p) => String(p.id).toUpperCase()).sort();
+    sortedIds.forEach((id, i) => map.set(id, MACHINE_PALETTE[i % MACHINE_PALETTE.length]));
+    return map;
+  }
+
   function paintFromSnap(win) {
-    const html = snapMap[kpiSnapKey(sub, win)];
-    if (html) { refs.view.innerHTML = html; refs.note.hidden = true; return true; }
+    const html = snapMap[win.key];
+    if (html && !lastData) {
+      refs.root.innerHTML = html;
+      refs.note.hidden = true;
+      return true;
+    }
     return false;
   }
-  // store the freshly rendered HTML for instant reuse next time
+
   function cacheRender(win) {
-    snapMap[kpiSnapKey(sub, win)] = refs.view.innerHTML;
-    saveKpiSnap(snapMap);
+    if (!ui.selectedMachine && ui.chartMode === "bins" && ui.bottomTab === "audit") {
+      snapMap[win.key] = refs.root.innerHTML;
+      saveKpiSnap(snapMap);
+    }
+  }
+
+  function paintBento() {
+    if (!lastData) return;
+    const { curB, prevB, win, colorMap } = lastData;
+
+    const filterId = ui.selectedMachine;
+    const curMachines = filterId
+      ? curB.perMachine.filter((p) => String(p.id).toUpperCase() === filterId)
+      : curB.perMachine;
+    const prevMachines = filterId
+      ? prevB.perMachine.filter((p) => String(p.id).toUpperCase() === filterId)
+      : prevB.perMachine;
+    const activeCycles = filterId
+      ? curB.cycles.filter((c) => String(c.machine).toUpperCase() === filterId)
+      : curB.cycles;
+
+    const now = fleetKpis(curMachines);
+    const was = fleetKpis(prevMachines);
+
+    const stacked = stackedSeries(activeCycles, curB.perMachine, win, ui.chartMode);
+    if (ui.activeBarIdx == null || ui.activeBarIdx >= stacked.cols.length) {
+      ui.activeBarIdx = stacked.peakIdx;
+    }
+
+    const mix = timeMixSummary(curMachines);
+    const progs = byProgram(activeCycles);
+    const periods = programPeriods(activeCycles, win);
+    const periodMap = new Map(periods.map((p) => [p.program, p]));
+    const trendSer = kpiSeries(activeCycles, win, 24);
+    const days = byDay(activeCycles);
+    const hours = byHour(activeCycles);
+    const mat = dayHourMatrix(activeCycles);
+
+    const filterBanner = filterId ? (() => {
+      const mObj = curB.perMachine.find((p) => String(p.id).toUpperCase() === filterId);
+      const col = colorMap.get(filterId) || "#3b82f6";
+      return `<div class="kb-filter-bar">
+        <span class="kb-filter-left"><span class="kb-filter-swatch" style="background:${col}"></span>Focused on <strong>${escapeHtml(mObj ? mObj.name : filterId)}</strong> — all metrics &amp; charts filtered</span>
+        <button type="button" class="kb-clear-btn" data-kb-clear="1">Show full fleet</button>
+      </div>`;
+    })() : "";
+
+    refs.root.innerHTML = [
+      filterBanner,
+      renderSummaryStrip(now, was, win),
+      renderHeroStacked(stacked, curB.perMachine, colorMap, ui),
+      `<div class="kb-bento3">
+        ${renderMachinePerfCard(curB.perMachine, prevB.perMachine, colorMap, ui)}
+        ${renderTimeMixCard(mix, trendSer, hours, days, win)}
+        ${renderProgramsCard(progs, periodMap, activeCycles.length)}
+      </div>`,
+      renderDeepDiveCard(curB.perMachine, prevB.perMachine, colorMap, mat, days, hours, activeCycles.length, win, ui),
+    ].join("");
+
+    wireInteractions(refs.root, stacked, colorMap);
+  }
+
+  function wireInteractions(root, stacked, colorMap) {
+    // Clear single-machine filter
+    const clearBtn = root.querySelector("[data-kb-clear]");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        ui.selectedMachine = null;
+        ui.activeBarIdx = null;
+        paintBento();
+      });
+    }
+
+    // Stacked chart mode switch
+    root.querySelectorAll("[data-kb-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.kbMode;
+        if (mode === ui.chartMode) return;
+        ui.chartMode = mode;
+        ui.activeBarIdx = null;
+        paintBento();
+      });
+    });
+
+    // Machine cross-filter (legend chips, performance bars, audit table rows)
+    root.querySelectorAll("[data-kb-machine]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = String(el.dataset.kbMachine || "").toUpperCase();
+        if (!id) return;
+        ui.selectedMachine = ui.selectedMachine === id ? null : id;
+        ui.activeBarIdx = null;
+        paintBento();
+      });
+    });
+
+    // Bottom panel switch (Fleet Scorecard Table vs Day x Hour Heatmap)
+    root.querySelectorAll("[data-kb-bottom]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = btn.dataset.kbBottom;
+        if (next === ui.bottomTab) return;
+        ui.bottomTab = next;
+        paintBento();
+      });
+    });
+
+    // Spotlight bar hover/click + live tooltip repositioning without full DOM rebuild
+    const cols = root.querySelectorAll("[data-kb-col]");
+    const tipEl = root.querySelector("#kbStackTip");
+    const stageEl = root.querySelector("#kbStackStage");
+
+    function updateSpotlight(idx) {
+      if (idx < 0 || idx >= stacked.cols.length) return;
+      ui.activeBarIdx = idx;
+      cols.forEach((c) => c.classList.toggle("is-spot", Number(c.dataset.kbCol) === idx));
+      if (!tipEl || !stageEl) return;
+      const colData = stacked.cols[idx];
+      tipEl.innerHTML = buildTooltipHTML(colData, colorMap);
+      positionTooltip(tipEl, stageEl, idx, stacked.cols.length);
+    }
+
+    cols.forEach((colEl) => {
+      const idx = Number(colEl.dataset.kbCol);
+      colEl.addEventListener("mouseenter", () => updateSpotlight(idx));
+      colEl.addEventListener("click", () => updateSpotlight(idx));
+    });
+
+    if (tipEl && stageEl && stacked.cols.length) {
+      positionTooltip(tipEl, stageEl, ui.activeBarIdx, stacked.cols.length);
+    }
   }
 
   async function refresh() {
-    if (document.hidden) return;        // skip work while the tab is off-screen
+    if (document.hidden) return;
     const my = ++token;
     const current = () => my === token;
 
-    // INSTANT: paint the last good render for this sub-view+window right away,
-    // before any network. The fresh compute below silently replaces it.
     const win0 = dataLayer.resolveWindow();
     const hadSnap = paintFromSnap(win0);
+    if (!hadSnap && !lastData) {
+      refs.root.innerHTML = `<div class="kb-skel"></div><div class="kb-skel" style="height:280px"></div>`;
+    }
 
     let ov;
     try { ov = await dataLayer.overview(); }
-    catch (err) { 
-      if (current() && !hadSnap) {
-        const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('aborted'));
-        note(refs, isTimeout 
-          ? "Computing fleet KPIs — collector is slow, please wait…" 
-          : "Collector unreachable — cannot fetch machine list.");
+    catch (err) {
+      if (current() && !hadSnap && !lastData) {
+        const isTimeout = err.name === "AbortError" || (err.message && err.message.includes("aborted"));
+        note(refs, isTimeout ? "Computing fleet KPIs — collector is slow, please wait…" : "Collector unreachable — cannot fetch machine list.");
       }
-      return; 
+      return;
     }
     if (!current()) return;
+
     const machines = Array.isArray(ov.machines) ? ov.machines : [];
-    if (!machines.length) { if (current() && !hadSnap) note(refs, "No machines reported."); return; }
+    if (!machines.length) {
+      if (current() && !hadSnap) note(refs, "No machines reported by the collector.");
+      return;
+    }
     refs.note.hidden = true;
 
     const win = dataLayer.resolveWindow();
     const span = win.to - win.from;
+    const prevWin = { key: win.key, label: "prev", from: win.from - span, to: win.from };
 
     try {
-      if (sub === "scorecard") await renderScorecard(refs.view, dataLayer, machines, win, span, current);
-      else if (sub === "programs") await renderPrograms(refs.view, dataLayer, machines, win, current);
-      else if (sub === "timing") await renderTiming(refs.view, dataLayer, machines, win, current);
-      else if (sub === "trends") await renderTrends(refs.view, dataLayer, machines, win, span, current);
-      if (current() && refs.view.children.length) cacheRender(win);
+      const [curB, prevB] = await Promise.all([
+        fleetBundle(dataLayer, machines, win),
+        fleetBundle(dataLayer, machines, prevWin),
+      ]);
+      if (!current()) return;
+
+      const colorMap = assignColors(curB.perMachine);
+      if (ui.selectedMachine && !colorMap.has(ui.selectedMachine)) {
+        ui.selectedMachine = null;
+      }
+      lastData = { curB, prevB, win, span, colorMap };
+      paintBento();
+      cacheRender(win);
     } catch (err) {
-      if (current()) {
-        const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('aborted'));
-        note(refs, isTimeout 
-          ? "Computing KPI data — some endpoints are slow, still loading…" 
-          : "Failed to compute KPI data — " + (err.message || "unknown error"));
+      if (current() && !lastData) {
+        const isTimeout = err.name === "AbortError" || (err.message && err.message.includes("aborted"));
+        note(refs, isTimeout ? "Computing KPI data — endpoints are slow, still loading…" : "Failed to compute KPI data — " + (err.message || "unknown error"));
       }
     }
   }
@@ -144,355 +297,511 @@ export function mountKpi(body, dataLayer) {
   return { refresh };
 }
 
-function note(refs, msg) { refs.note.textContent = msg; refs.note.hidden = false; }
+function note(refs, msg) {
+  refs.note.textContent = msg;
+  refs.note.hidden = false;
+}
 
-/* ===================== SCORECARD ===================== */
-async function renderScorecard(host, dataLayer, machines, win, span, current) {
-  if (!host.children.length) host.innerHTML = `<p class="ds-note">Computing fleet KPIs…</p>`;
-  const prevWin = { key: win.key, label: "prev", from: win.from - span, to: win.from };
+/* =================================================== ZONE 1: 5-KPI SUMMARY */
 
-  let curB, prevB;
-  try {
-    [curB, prevB] = await Promise.all([
-      fleetBundle(dataLayer, machines, win),
-      fleetBundle(dataLayer, machines, prevWin),
-    ]);
-  } catch (err) {
-    if (!current()) return;
-    const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('aborted'));
-    host.innerHTML = `<p class="ds-note">${isTimeout 
-      ? "Computing fleet KPIs — bulk endpoints are slow, still loading…" 
-      : "Failed to load KPI data: " + (err.message || "unknown error")}</p>`;
-    throw err; // re-throw so refresh() can catch it
+function renderSummaryStrip(now, was, win) {
+  const items = [
+    {
+      label: "Fleet OEE-lite",
+      color: "#3b82f6",
+      val: fmtPct(now.oee),
+      delta: deltaInfo(now.oee, was.oee, "pts"),
+      foot: was.oee != null ? `Prev ${fmtPct(was.oee)} · ${win.label}` : `Availability × Performance`,
+      tip: "Overall Equipment Effectiveness (lite) = Availability × Performance from real rstat logs and M30 cycles.",
+    },
+    {
+      label: "Availability",
+      color: "#22c55e",
+      val: fmtPct(now.avail),
+      delta: deltaInfo(now.avail, was.avail, "pts"),
+      foot: was.avail != null ? `Prev ${fmtPct(was.avail)} · attended share` : "Run vs attended time",
+      tip: "Share of attended time machines were actively cutting (run ÷ run+pause+idle).",
+    },
+    {
+      label: "Performance",
+      color: "#f59e0b",
+      val: fmtPct(now.perf),
+      delta: deltaInfo(now.perf, was.perf, "pts"),
+      foot: was.perf != null ? `Prev ${fmtPct(was.perf)} · vs p10 pace` : "Cycle speed vs p10 best",
+      tip: "How close cycle times stay to each job's best-case (p10) pace.",
+    },
+    {
+      label: "Utilization",
+      color: "#8b5cf6",
+      val: fmtPct(now.util),
+      delta: deltaInfo(now.util, was.util, "pts"),
+      foot: `${fmtHours(now.runMs)} cutting in ${win.label}`,
+      tip: "Spindle cutting time as a share of the entire wall-clock window.",
+    },
+    {
+      label: "Parts Produced",
+      color: "#f472b6",
+      val: String(now.parts || 0),
+      delta: deltaInfo(now.parts, was.parts, "parts"),
+      foot: `Prev ${was.parts || 0} parts · ${win.label}`,
+      tip: "Completed M30 cycles across the selected fleet and time window.",
+    },
+  ];
+
+  return `<section class="kb-card kb-strip">
+    ${items.map((it) => `
+      <div class="kb-kpi-cell" data-tip-title="${tipAttr(it.label)}" data-tip="${tipAttr(it.tip)}">
+        <div class="kb-kpi-head">
+          <span class="kb-kpi-tick" style="background:${it.color}"></span>
+          <span>${it.label}</span>
+        </div>
+        <div class="kb-kpi-main">
+          <span class="kb-kpi-val">${it.val}</span>
+          ${it.delta.text ? `<span class="kb-delta ${it.delta.cls}">${it.delta.text}</span>` : ""}
+        </div>
+        <div class="kb-kpi-foot">${it.foot}</div>
+      </div>`).join("")}
+  </section>`;
+}
+
+/* ========================================== ZONE 2: HERO STACKED BAR CHART */
+
+function renderHeroStacked(stacked, perMachine, colorMap, ui) {
+  const modeBtns = [
+    { id: "bins", label: "Time Bins" },
+    { id: "hour", label: "By Hour" },
+    { id: "day", label: "By Day" },
+  ].map((m) => `<button type="button" class="kb-seg-btn ${ui.chartMode === m.id ? "is-active" : ""}" data-kb-mode="${m.id}">${m.label}</button>`).join("");
+
+  const legend = perMachine.map((p) => {
+    const id = String(p.id).toUpperCase();
+    const col = colorMap.get(id) || "#3b82f6";
+    const isSel = ui.selectedMachine === id;
+    const isDim = ui.selectedMachine && !isSel;
+    return `<button type="button" class="kb-leg-btn ${isSel ? "is-active" : ""} ${isDim ? "is-dim" : ""}" data-kb-machine="${escapeHtml(id)}" title="Click to focus on ${escapeHtml(p.name)}">
+      <span class="kb-swatch" style="background:${col}"></span>
+      <span>${escapeHtml(p.name)}</span>
+    </button>`;
+  }).join("");
+
+  if (!stacked.cols.length || stacked.maxTotal === 0) {
+    return `<section class="kb-card kb-hero">
+      <div class="kb-card-head">
+        <div class="kb-card-title-wrap">
+          <h3 class="kb-card-title">Production &amp; Fleet Breakdown</h3>
+          <span class="kb-card-sub">Stacked completed parts attributed by machine</span>
+        </div>
+        <div class="kb-seg">${modeBtns}</div>
+      </div>
+      <div class="kb-legend">${legend}</div>
+      <div class="kb-empty">No completed parts in this window. Try expanding the time window above.</div>
+    </section>`;
   }
-  if (!current()) return;
-  const now = fleetKpis(curB.perMachine);
-  const was = fleetKpis(prevB.perMachine);
 
-  const gauges =
-    gauge("OEE-lite", now.oee, was.oee, true,
-      "Overall Equipment Effectiveness (lite) = Availability × Performance. The single headline of how productive the fleet is. Compared to the previous equal-length window.") +
-    gauge("Availability", now.avail, was.avail, false,
-      "Share of attended time the machines were actually cutting (run vs run+pause+idle), from the rstat execution log.") +
-    gauge("Performance", now.perf, was.perf, false,
-      "How close cycle times run to their best-case (p10) pace. 100% = every cycle as fast as the fleet's fastest typical cycle.") +
-    gauge("Utilization", now.util, was.util, false,
-      "Run time as a share of the FULL wall-clock window (not just attended) — raw spindle-on duty.") +
-    `<div class="kpi-gauge kpi-parts" data-tip-title="Parts · ${tipAttr(win.label)}" data-tip="${tipAttr(`Completed cycles (M30 counter) across the fleet this window. Trend compares to the previous ${win.label}.`)}">
-       <div class="kpi-parts-v ${now.parts >= was.parts ? "tone-good" : "tone-bad"}">${now.parts}</div>
-       <div class="kpi-gauge-foot"><span class="kpi-gauge-label">Parts · ${win.label}</span>
-       <span class="kpi-trend ${trend(now.parts, was.parts).cls}">${trend(now.parts, was.parts).arrow} ${Math.abs(now.parts - was.parts)}</span></div>
-     </div>`;
+  const maxY = niceCeil(stacked.maxTotal);
+  const ticks = [maxY, Math.round(maxY * 0.75), Math.round(maxY * 0.5), Math.round(maxY * 0.25), 0];
 
-  const ladderRows = curB.perMachine.map((p) => ({ name: p.name, id: p.id, oee: p.x ? p.x.oee : null, parts: p.x ? p.x.parts : 0, online: p.online }))
-    .sort((a, b) => (b.oee || 0) - (a.oee || 0));
+  const barsHtml = stacked.cols.map((col, idx) => {
+    const isSpot = idx === ui.activeBarIdx;
+    const colPct = maxY > 0 ? (col.total / maxY) * 100 : 0;
+    const pieces = col.byMachine.map((m, sIdx) => {
+      const segPct = col.total > 0 ? (m.count / col.total) * 100 : 0;
+      const color = colorMap.get(m.id) || "#3b82f6";
+      return `<span class="kb-seg-piece ${sIdx === 0 ? "is-hatched" : ""}" style="height:${segPct.toFixed(2)}%;background:${color}"></span>`;
+    }).join("");
 
-  host.innerHTML = `
-    <div class="kpi-gauges">${gauges}</div>
-    <div class="kpi-ladder">
-      <div class="kpi-ladder-head" data-tip-title="OEE-lite by machine" data-tip="${tipAttr("Each machine's OEE for the window, ranked. The gap between top and bottom is where the fleet's easiest gains are.")}">OEE-lite by machine</div>
-      ${ladderRows.map((r) => `
-        <div class="kpi-ladder-row" data-tip-title="${tipAttr(`${r.name} — OEE ${fmtPct(r.oee)}`)}" data-tip="${tipAttr(`${r.parts} parts this window. ${r.online ? "Online." : "Offline."} OEE = availability × performance.`)}">
-          <span class="kpi-ladder-name">${r.name}</span>
-          <span class="kpi-ladder-bar"><span class="${oeeClass(r.oee)}" style="width:${r.oee == null ? 0 : Math.min(100, r.oee)}%"></span></span>
-          <span class="kpi-ladder-val ${oeeClass(r.oee)}">${fmtPct(r.oee)}</span>
-        </div>`).join("")}
+    return `<div class="kb-col ${isSpot ? "is-spot" : ""}" data-kb-col="${idx}">
+      <div class="kb-stack-track">
+        ${col.total > 0 ? `<div class="kb-stack" style="height:${Math.max(4, colPct).toFixed(2)}%">${pieces}</div>` : ""}
+      </div>
+      <span class="kb-col-x">${escapeHtml(col.label)}</span>
+    </div>`;
+  }).join("");
+
+  const spotCol = stacked.cols[ui.activeBarIdx] || stacked.cols[0];
+
+  return `<section class="kb-card kb-hero">
+    <div class="kb-card-head">
+      <div class="kb-card-title-wrap">
+        <h3 class="kb-card-title">Production &amp; Fleet Breakdown</h3>
+        <span class="kb-card-sub">Hover any column to inspect per-machine output · click a machine to focus</span>
+      </div>
+      <div class="kb-seg">${modeBtns}</div>
     </div>
-    ${scorecardReadout(curB, now, was, win)}`;
+    <div class="kb-legend">${legend}</div>
+    <div class="kb-chart-wrap">
+      <div class="kb-yaxis">${ticks.map((t) => `<span>${t}</span>`).join("")}</div>
+      <div class="kb-stage" id="kbStackStage">
+        <div class="kb-gridlines"><span></span><span></span><span></span><span></span><span></span></div>
+        <div class="kb-bars">${barsHtml}</div>
+        <div class="kb-tooltip" id="kbStackTip">${buildTooltipHTML(spotCol, colorMap)}</div>
+      </div>
+    </div>
+  </section>`;
 }
 
-function scorecardReadout(bundle, now, was, win) {
-  const scored = bundle.perMachine.filter((p) => p.x && p.x.oee != null).sort((a, b) => b.x.oee - a.x.oee);
-  const best = scored[0], worst = scored[scored.length - 1];
-  const dOee = was.oee != null && now.oee != null ? now.oee - was.oee : null;
-  const runH = (now.runMs / 3600000);
-  const stat = (val, lab, sub, tone = "") => `<div class="mt-ro-stat"><span class="mt-ro-val ${tone}">${val}</span><span class="mt-ro-lab">${lab}</span><span class="mt-ro-sub">${sub}</span></div>`;
-
-  const rows = scored.map((p) => `<tr>
-      <td>${p.name}</td>
-      <td class="num">${fmtPct(p.x.oee)}</td>
-      <td class="num">${fmtPct(p.x.availability)}</td>
-      <td class="num">${fmtPct(p.x.performance)}</td>
-      <td class="num">${p.x.parts}</td>
-      <td class="num">${fmtSec(p.x.cstats.median)}</td>
-    </tr>`).join("");
-
-  return `
-    <div class="mt-readout">
-      <div class="mt-ro-head"><span class="mt-ro-kicker">FLEET SCORECARD · ${win.label}</span><h3>How the fleet performed</h3></div>
-      <div class="mt-ro-stats">
-        ${stat(fmtPct(now.oee), "Fleet OEE-lite", dOee == null ? "no prior window" : `${dOee >= 0 ? "▲" : "▼"} ${Math.abs(dOee).toFixed(1)} pts vs prev`, oeeClass(now.oee))}
-        ${stat(now.parts, "Parts produced", `prev ${was.parts}`, now.parts >= was.parts ? "tone-good" : "tone-bad")}
-        ${stat(runH.toFixed(1) + "h", "Run time", "spindle cutting", "")}
-        ${best ? stat(best.name, "Best machine", `OEE ${fmtPct(best.x.oee)}`, "tone-good") : ""}
-        ${worst && worst !== best ? stat(worst.name, "Needs focus", `OEE ${fmtPct(worst.x.oee)}`, "tone-bad") : ""}
-      </div>
-      <div class="mt-ro-table">
-        <div class="mt-ro-cap">Per-machine breakdown — ranked by OEE</div>
-        <table><thead><tr><th>Machine</th><th class="num">OEE</th><th class="num">Avail</th><th class="num">Perf</th><th class="num">Parts</th><th class="num">Median cyc</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6">no cycles in window</td></tr>`}</tbody></table>
-      </div>
-      <p class="mt-ro-note">OEE-lite = Availability × Performance (no quality term — the controllers don't emit a reject counter). Availability = run ÷ attended time. Performance = best-case cycle (p10) × parts ÷ run time. All from real rstat segments and M30 cycle counts over the ${win.label} window.</p>
-    </div>`;
-}
-
-/* ===================== PROGRAMS ===================== */
-async function renderPrograms(host, dataLayer, machines, win, current) {
-  if (!host.children.length) host.innerHTML = `<p class="ds-note">Grouping cycles by program…</p>`;
-  const { cycles } = await fleetBundle(dataLayer, machines, win);
-  if (!current()) return;
-
-  if (!cycles.length) {
-    host.innerHTML = `<div class="mt-pred-empty">No completed cycles in this window, so there's nothing to break down by program yet. Widen the window to 7&nbsp;d.</div>`;
-    return;
-  }
-
-  const progs = byProgram(cycles);
-  const periods = programPeriods(cycles, win);
-  const periodByProg = new Map(periods.map((p) => [p.program, p]));
-  const totalParts = cycles.length;
-
-  const head = `
-    <div class="mt-pred-head">
-      <div class="mt-pred-count is-ok"><span class="mt-pred-n">${progs.length}</span><span class="mt-pred-k">programs run · ${totalParts} parts</span></div>
-      <span class="mt-pred-sub">cycle time, consistency &amp; how each job reacted across the window — best jobs first</span>
-    </div>`;
-
-  const cards = progs.map((p) => {
-    const per = periodByProg.get(p.program);
-    const cvTone = p.cv == null ? "" : p.cv < 0.1 ? "tone-good" : p.cv < 0.25 ? "tone-warn" : "tone-bad";
-    const driftBadge = p.slopePerH == null ? "" :
-      Math.abs(p.slopePerH) < 0.5 ? `<span class="kpi-prog-drift tone-good" data-tip-title="Stable" data-tip="Cycle time held steady across the window (Theil-Sen slope under 0.5 s/h).">● stable</span>` :
-      p.slopePerH > 0 ? `<span class="kpi-prog-drift tone-bad" data-tip-title="Slowing down" data-tip="${tipAttr(`Median cycle is climbing ${p.slopePerH.toFixed(1)}s every hour — dulling tool, reduced override, or harder material. Robust Theil-Sen slope.`)}">▲ +${p.slopePerH.toFixed(1)}s/h</span>` :
-      `<span class="kpi-prog-drift tone-good" data-tip-title="Speeding up" data-tip="${tipAttr(`Median cycle is dropping ${Math.abs(p.slopePerH).toFixed(1)}s/h — getting faster across the window.`)}">▼ ${p.slopePerH.toFixed(1)}s/h</span>`;
-
-    const periodBlock = per ? (() => {
-      const faster = per.deltaPct < 0;
-      const tone = Math.abs(per.deltaPct) < 3 ? "tone-warn" : faster ? "tone-good" : "tone-bad";
-      return `<div class="kpi-prog-period" data-tip-title="Same program, two halves of the window" data-tip="${tipAttr(`First half: median ${fmtSec(per.firstMed)} over ${per.na} parts. Second half: ${fmtSec(per.secondMed)} over ${per.nb} parts. ${faster ? "Got faster" : "Got slower"} by ${Math.abs(per.deltaPct).toFixed(1)}%.`)}">
-        <span class="kpi-pp-half">1st ${fmtSec(per.firstMed)}</span>
-        <span class="kpi-pp-arrow ${tone}">${faster ? "→ ▼" : "→ ▲"}</span>
-        <span class="kpi-pp-half">2nd ${fmtSec(per.secondMed)}</span>
-        <span class="kpi-pp-delta ${tone}">${per.deltaPct >= 0 ? "+" : ""}${per.deltaPct.toFixed(1)}%</span>
+function buildTooltipHTML(col, colorMap) {
+  if (!col) return "";
+  const rows = col.byMachine
+    .slice()
+    .sort((a, b) => b.count - a.count)
+    .map((m) => {
+      const color = colorMap.get(m.id) || "#3b82f6";
+      return `<div class="kb-tip-row">
+        <span class="kb-tip-tick" style="background:${color}"></span>
+        <span class="kb-tip-name">${escapeHtml(m.name)}</span>
+        <span class="kb-tip-val">${m.count}</span>
+        <span class="kb-tip-cyc">${fmtSec(m.median)}</span>
       </div>`;
-    })() : `<div class="kpi-prog-period kpi-pp-na">not enough cycles to split the window</div>`;
+    }).join("");
 
-    return `<div class="kpi-prog-card">
-      <div class="kpi-prog-top">
-        <span class="kpi-prog-name" data-tip-title="${tipAttr(`Program ${p.program}`)}" data-tip="${tipAttr(`${p.n} parts on ${p.machines.join(", ")}. ${(p.share * 100).toFixed(0)}% of the window's production by run time.`)}">${escapeHtml(p.program)}</span>
-        ${driftBadge}
-      </div>
-      <div class="kpi-prog-stats">
-        <div class="kpi-prog-stat" data-tip-title="Parts" data-tip="Completed cycles of this program in the window."><span class="kpi-ps-v">${p.n}</span><span class="kpi-ps-l">parts</span></div>
-        <div class="kpi-prog-stat" data-tip-title="Median cycle" data-tip="Typical cycle time (50th percentile) — robust to outliers."><span class="kpi-ps-v">${fmtSec(p.median)}</span><span class="kpi-ps-l">median</span></div>
-        <div class="kpi-prog-stat" data-tip-title="Best-case cycle" data-tip="10th-percentile cycle — what this job achieves when everything's right. The gap to median is recoverable time."><span class="kpi-ps-v">${fmtSec(p.p10)}</span><span class="kpi-ps-l">best</span></div>
-        <div class="kpi-prog-stat" data-tip-title="Consistency (CV)" data-tip="${tipAttr(`Coefficient of variation = spread ÷ mean. ${p.cv == null ? "" : (p.cv * 100).toFixed(0) + "% — "}lower is more repeatable. Above 25% means cycles are scattering.`)}"><span class="kpi-ps-v ${cvTone}">${p.cv == null ? "—" : (p.cv * 100).toFixed(0) + "%"}</span><span class="kpi-ps-l">CV</span></div>
-      </div>
-      <div class="kpi-prog-share" data-tip-title="Production share" data-tip="${tipAttr(`This program is ${(p.share * 100).toFixed(1)}% of the window's total run time.`)}">
-        <span class="kpi-prog-share-bar"><span style="width:${(p.share * 100).toFixed(1)}%"></span></span>
-        <span class="kpi-prog-share-v">${(p.share * 100).toFixed(0)}%</span>
-      </div>
-      ${periodBlock}
-    </div>`;
-  }).join("");
-
-  host.innerHTML = head + `<div class="kpi-prog-grid">${cards}</div>
-    <p class="mt-ro-note">Each program's cycle stats come from real M30 completions tagged by the ncprog timeline. "Same program, two halves" splits the window at its midpoint and compares median cycle — the honest read on whether a job sped up or slowed down. Drift is a Theil-Sen slope (robust to a few odd cycles).</p>`;
+  return `<div class="kb-tip-head">
+      <span class="kb-tip-title">${escapeHtml(col.fullLabel)}</span>
+      <span class="kb-tip-tot">${col.total} parts</span>
+    </div>
+    <div class="kb-tip-list">${rows || `<span class="kb-tip-name">No completions in slice</span>`}</div>`;
 }
 
-/* ===================== TIMING ===================== */
-async function renderTiming(host, dataLayer, machines, win, current) {
-  if (!host.children.length) host.innerHTML = `<p class="ds-note">Building day × hour profile…</p>`;
-  const { cycles } = await fleetBundle(dataLayer, machines, win);
-  if (!current()) return;
+function positionTooltip(tipEl, stageEl, idx, totalCols) {
+  if (!totalCols) return;
+  const stageW = stageEl.clientWidth || 600;
+  const tipW = tipEl.offsetWidth || 210;
+  const colCenter = ((idx + 0.5) / totalCols) * stageW;
+  let left = colCenter + 26;
+  if (left + tipW > stageW - 8) {
+    left = colCenter - tipW - 26;
+  }
+  left = Math.max(8, Math.min(stageW - tipW - 8, left));
+  tipEl.style.left = `${Math.round(left)}px`;
+}
 
-  if (!cycles.length) {
-    host.innerHTML = `<div class="mt-pred-empty">No cycles in this window to profile by day or hour.</div>`;
-    return;
+/* ======================================= ZONE 3: 3-COLUMN ANALYTICAL BENTO */
+
+function renderMachinePerfCard(curPerMachine, prevPerMachine, colorMap, ui) {
+  const prevById = new Map(prevPerMachine.map((p) => [String(p.id).toUpperCase(), p.x ? p.x.oee : null]));
+  const rows = curPerMachine.map((p) => {
+    const id = String(p.id).toUpperCase();
+    const oee = p.x ? p.x.oee : null;
+    const prev = prevById.get(id);
+    return {
+      id,
+      name: p.name,
+      online: p.online,
+      oee,
+      parts: p.x ? p.x.parts : 0,
+      delta: deltaInfo(oee, prev, "pts"),
+      color: colorMap.get(id) || "#3b82f6",
+    };
+  }).sort((a, b) => (b.oee ?? -1) - (a.oee ?? -1));
+
+  return `<section class="kb-card">
+    <div class="kb-card-head">
+      <div class="kb-card-title-wrap">
+        <h3 class="kb-card-title">Machine Performance</h3>
+        <span class="kb-card-sub">Ranked OEE-lite with period delta</span>
+      </div>
+    </div>
+    <div class="kb-perf-list">
+      ${rows.map((r) => {
+        const isSel = ui.selectedMachine === r.id;
+        const isDim = ui.selectedMachine && !isSel;
+        const w = r.oee == null ? 0 : Math.max(3, Math.min(100, r.oee));
+        return `<div class="kb-perf-row ${isSel ? "is-active" : ""} ${isDim ? "is-dim" : ""}" data-kb-machine="${escapeHtml(r.id)}" data-tip-title="${tipAttr(`${r.name} · ${fmtPct(r.oee)} OEE`)}" data-tip="${tipAttr(`${r.parts} parts completed. Click to focus all charts on ${r.name}.`)}">
+          <div class="kb-perf-top">
+            <span class="kb-perf-name">
+              <span class="kb-swatch" style="background:${r.color}"></span>
+              <span>${escapeHtml(r.name)}</span>
+              <span class="kb-perf-state ${r.online ? "" : "is-off"}">${r.online ? `${r.parts} pcs` : "Offline"}</span>
+            </span>
+            <span class="kb-perf-nums">
+              <span class="kb-perf-val">${fmtPctInt(r.oee)}</span>
+              ${r.delta.text ? `<span class="kb-delta ${r.delta.cls}">${r.delta.text}</span>` : ""}
+            </span>
+          </div>
+          <div class="kb-stripe-track">
+            <div class="kb-stripe-fill" style="width:${w.toFixed(1)}%;background-color:${r.color}"></div>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+  </section>`;
+}
+
+function renderTimeMixCard(mix, trendSer, hours, days, win) {
+  // Segmented rounded stadium pill-ring SVG (path perimeter ~ 328.5)
+  // Stadium path: M 45 12 H 111 A 34 34 0 0 1 111 80 H 45 A 34 34 0 0 1 45 12 Z
+  const perim = 2 * 66 + 2 * Math.PI * 34; // ~345.63
+  const nonZero = mix.items.filter((it) => it.pct >= 0.6);
+  const gap = nonZero.length > 1 ? 5 : 0;
+  let offset = 0;
+
+  const arcs = nonZero.map((it) => {
+    const rawLen = (it.pct / 100) * perim;
+    const segLen = Math.max(2, rawLen - gap);
+    const dashArray = `${segLen.toFixed(2)} ${(perim - segLen).toFixed(2)}`;
+    const dashOffset = (-offset).toFixed(2);
+    offset += rawLen;
+    return `<path d="M 45 12 H 111 A 34 34 0 0 1 111 80 H 45 A 34 34 0 0 1 45 12 Z"
+      fill="none" stroke="${it.color}" stroke-width="14" stroke-linecap="butt"
+      stroke-dasharray="${dashArray}" stroke-dashoffset="${dashOffset}" />`;
+  }).join("");
+
+  const runItem = mix.items[0];
+  const runPct = runItem ? Math.round(runItem.pct) : 0;
+
+  // Cadence micro-bars (24 window slices colored by intensity)
+  const pts = trendSer.pts || [];
+  const maxBin = Math.max(...pts.map((p) => p.parts), 1);
+  const cadenceHtml = pts.map((p, i) => {
+    const ratio = p.parts / maxBin;
+    const h = p.parts > 0 ? Math.max(12, Math.round(ratio * 100)) : 8;
+    const color = i < 8 ? "#22c55e" : i < 16 ? "#f59e0b" : "#3b82f6";
+    const opacity = p.parts > 0 ? (0.45 + ratio * 0.55).toFixed(2) : "0.18";
+    return `<span class="kb-cbar" style="height:${h}%;background:${color};opacity:${opacity}" data-tip-title="${tipAttr(new Date(p.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }))}" data-tip="${tipAttr(`${p.parts} parts · median ${fmtSec(p.median)}`)}"></span>`;
+  }).join("");
+
+  const pSlope = trendSer.partsSlopePerH;
+  const cSlope = trendSer.medSlopePerH;
+  const pVerdict = pSlope == null ? "—" : pSlope > 0.05 ? "▲ Improving" : pSlope < -0.05 ? "▼ Slipping" : "→ Holding";
+  const pCls = pSlope == null ? "is-flat" : pSlope > 0.05 ? "is-up" : pSlope < -0.05 ? "is-down" : "is-flat";
+  const cVerdict = cSlope == null ? "—" : cSlope < -0.3 ? "▼ Faster" : cSlope > 0.3 ? "▲ Slower" : "→ Steady";
+  const cCls = cSlope == null ? "is-flat" : cSlope < -0.3 ? "is-up" : cSlope > 0.3 ? "is-down" : "is-flat";
+  const peakHour = hours.slice().sort((a, b) => b.parts - a.parts)[0];
+  const peakStr = peakHour && peakHour.parts > 0 ? hourLabel(peakHour.hour) : "—";
+
+  return `<section class="kb-card">
+    <div class="kb-card-head">
+      <div class="kb-card-title-wrap">
+        <h3 class="kb-card-title">Fleet Time Mix</h3>
+        <span class="kb-card-sub">Execution states &amp; throughput trend (${win.label})</span>
+      </div>
+    </div>
+    <div class="kb-mix-wrap">
+      <svg class="kb-stadium-svg" viewBox="0 0 156 92" aria-label="Fleet execution state mix">
+        <path d="M 45 12 H 111 A 34 34 0 0 1 111 80 H 45 A 34 34 0 0 1 45 12 Z"
+          fill="none" stroke="var(--kb-track)" stroke-width="14" />
+        ${arcs}
+        <text x="78" y="45" text-anchor="middle" class="kb-stadium-pct">${runPct}%</text>
+        <text x="78" y="60" text-anchor="middle" class="kb-stadium-sub">Cutting</text>
+      </svg>
+      <div class="kb-mix-legend">
+        ${mix.items.map((it) => `
+          <div class="kb-mix-row">
+            <span class="kb-swatch" style="background:${it.color}"></span>
+            <span class="kb-mix-lbl">${it.label}</span>
+            <span class="kb-mix-val">${Math.round(it.pct)}%</span>
+            <span class="kb-mix-hrs">${fmtHours(it.ms)}</span>
+          </div>`).join("")}
+      </div>
+    </div>
+    <div class="kb-cadence-block">
+      <div class="kb-cadence-head">
+        <span>Throughput Cadence</span>
+        <span class="kb-card-sub">${days.length} active day${days.length === 1 ? "" : "s"}</span>
+      </div>
+      <div class="kb-cadence-bars">${cadenceHtml}</div>
+      <div class="kb-verdict-row">
+        <div class="kb-verdict-item"><span class="kb-verdict-k">Output slope</span><span class="kb-verdict-v kb-delta ${pCls}">${pVerdict}</span></div>
+        <div class="kb-verdict-item"><span class="kb-verdict-k">Cycle pace</span><span class="kb-verdict-v kb-delta ${cCls}">${cVerdict}</span></div>
+        <div class="kb-verdict-item"><span class="kb-verdict-k">Peak hour</span><span class="kb-verdict-v">${peakStr}</span></div>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderProgramsCard(progs, periodMap, totalParts) {
+  const top = progs.slice(0, 6);
+  const shareBar = top.length ? `<div class="kb-share-bar">
+    ${top.map((p, i) => `<span class="kb-share-seg" style="width:${(p.share * 100).toFixed(2)}%;background:${PROGRAM_PALETTE[i % PROGRAM_PALETTE.length]}" data-tip-title="${tipAttr(p.program)}" data-tip="${tipAttr(`${p.n} parts · ${(p.share * 100).toFixed(1)}% of cutting time`)}"></span>`).join("")}
+  </div>` : "";
+
+  const rowsHtml = top.length ? top.map((p, i) => {
+    const color = PROGRAM_PALETTE[i % PROGRAM_PALETTE.length];
+    const per = periodMap.get(p.program);
+    let driftHtml = `<span class="kb-delta is-flat">stable</span>`;
+    if (per && Math.abs(per.deltaPct) >= 1.5) {
+      const faster = per.deltaPct < 0;
+      driftHtml = `<span class="kb-delta ${faster ? "is-up" : "is-down"}" data-tip-title="1st half vs 2nd half" data-tip="${tipAttr(`1st half ${fmtSec(per.firstMed)} → 2nd half ${fmtSec(per.secondMed)}`)}">${faster ? "▼" : "▲"} ${Math.abs(per.deltaPct).toFixed(1)}%</span>`;
+    }
+    const cvStr = p.cv != null ? `CV ${(p.cv * 100).toFixed(0)}%` : "CV —";
+    return `<div class="kb-prog-row">
+      <div class="kb-prog-top">
+        <span class="kb-prog-name" title="${escapeHtml(p.program)}">
+          <span class="kb-swatch" style="background:${color}"></span>
+          <span>${escapeHtml(p.program)}</span>
+        </span>
+        <span class="kb-prog-parts">${p.n} pcs · ${(p.share * 100).toFixed(0)}%</span>
+      </div>
+      <div class="kb-prog-meta">
+        <span>Med ${fmtSec(p.median)} · Best ${fmtSec(p.p10)} · ${cvStr}</span>
+        ${driftHtml}
+      </div>
+    </div>`;
+  }).join("") : `<div class="kb-empty">No program cycles completed in this window.</div>`;
+
+  return `<section class="kb-card">
+    <div class="kb-card-head">
+      <div class="kb-card-title-wrap">
+        <h3 class="kb-card-title">Active Programs &amp; Drift</h3>
+        <span class="kb-card-sub">${progs.length} program${progs.length === 1 ? "" : "s"} · ${totalParts} parts</span>
+      </div>
+    </div>
+    ${shareBar}
+    <div class="kb-prog-list">${rowsHtml}</div>
+  </section>`;
+}
+
+/* ======================================= ZONE 4: DEEP-DIVE TABLE & HEATMAP */
+
+function renderDeepDiveCard(curPerMachine, prevPerMachine, colorMap, mat, days, hours, totalParts, win, ui) {
+  const prevById = new Map(prevPerMachine.map((p) => [String(p.id).toUpperCase(), p.x ? p.x.oee : null]));
+  const tabs = `
+    <div class="kb-seg">
+      <button type="button" class="kb-seg-btn ${ui.bottomTab === "audit" ? "is-active" : ""}" data-kb-bottom="audit">Fleet Scorecard</button>
+      <button type="button" class="kb-seg-btn ${ui.bottomTab === "heatmap" ? "is-active" : ""}" data-kb-bottom="heatmap">Day × Hour Heatmap</button>
+    </div>`;
+
+  let bodyHtml = "";
+  if (ui.bottomTab === "heatmap") {
+    const bestDay = days.slice().sort((a, b) => b.parts - a.parts)[0];
+    const peakHour = hours.slice().sort((a, b) => b.parts - a.parts)[0];
+    if (!mat.days.length) {
+      bodyHtml = `<div class="kb-empty">No completed cycles to plot by day and hour yet.</div>`;
+    } else {
+      bodyHtml = `
+        <div class="kb-heat-callouts">
+          <div class="kb-hc-item">
+            <span class="kb-hc-k">Best day</span>
+            <span class="kb-hc-v">${bestDay ? dayLabel(bestDay.day) : "—"}</span>
+            <span class="kb-hc-sub">${bestDay ? `${bestDay.parts} parts · ${fmtSec(bestDay.median)} med` : ""}</span>
+          </div>
+          <div class="kb-hc-item">
+            <span class="kb-hc-k">Peak hour</span>
+            <span class="kb-hc-v">${peakHour && peakHour.parts ? hourLabel(peakHour.hour) : "—"}</span>
+            <span class="kb-hc-sub">${peakHour ? `${peakHour.parts} parts across window` : ""}</span>
+          </div>
+          <div class="kb-hc-item">
+            <span class="kb-hc-k">Active days</span>
+            <span class="kb-hc-v">${days.length}</span>
+            <span class="kb-hc-sub">${totalParts} completed cycles</span>
+          </div>
+        </div>
+        <div class="kb-heat-grid">
+          <div></div>
+          ${Array.from({ length: 24 }, (_, h) => `<div class="kb-heat-hh">${h % 3 === 0 ? h : ""}</div>`).join("")}
+          ${mat.days.map((d) => `
+            <div class="kb-heat-day">${dayLabel(d).replace(/,.*/, "")}</div>
+            ${mat.grid.get(d).map((v, h) => {
+              const a = mat.max ? v / mat.max : 0;
+              return `<div class="kb-heat-cell" style="background:${heatColor(a)}" data-tip-title="${tipAttr(`${dayLabel(d)} · ${hourLabel(h)}`)}" data-tip="${tipAttr(`${v} part${v === 1 ? "" : "s"} completed`)}"></div>`;
+            }).join("")}`).join("")}
+        </div>`;
+    }
+  } else {
+    const ranked = curPerMachine.slice().sort((a, b) => ((b.x && b.x.oee) ?? -1) - ((a.x && a.x.oee) ?? -1));
+    const rows = ranked.map((p) => {
+      const id = String(p.id).toUpperCase();
+      const x = p.x || {};
+      const color = colorMap.get(id) || "#3b82f6";
+      const prevOee = prevById.get(id);
+      const d = deltaInfo(x.oee, prevOee, "pts");
+      const isDim = ui.selectedMachine && ui.selectedMachine !== id;
+      return `<tr class="${isDim ? "is-dim" : ""}" data-kb-machine="${escapeHtml(id)}">
+        <td>
+          <div class="kb-tbl-mc">
+            <span class="kb-swatch" style="background:${color}"></span>
+            <div>
+              <span class="kb-tbl-mc-name">${escapeHtml(p.name)}</span>
+              <span class="kb-tbl-mc-sub">${p.online ? "Online" : "Offline"} · ${fmtHours(x.buckets ? x.buckets.run : 0)} cutting</span>
+            </div>
+          </div>
+        </td>
+        <td>${radialRing(x.oee)}</td>
+        <td>${miniBar(x.availability, "#22c55e")}</td>
+        <td>${miniBar(x.performance, "#f59e0b")}</td>
+        <td>${miniBar(x.utilization, "#8b5cf6")}</td>
+        <td class="num"><strong>${x.parts || 0}</strong></td>
+        <td class="num">${fmtSec(x.cstats ? x.cstats.median : null)}</td>
+        <td class="num"><span class="kb-delta ${d.cls}">${d.text || "—"}</span></td>
+      </tr>`;
+    }).join("");
+
+    bodyHtml = `<div class="kb-table-wrap">
+      <table class="kb-table">
+        <thead>
+          <tr>
+            <th>Machine</th>
+            <th>OEE Score</th>
+            <th>Availability</th>
+            <th>Performance</th>
+            <th>Utilization</th>
+            <th class="num">Parts</th>
+            <th class="num">Median Cycle</th>
+            <th class="num">vs Prev ${escapeHtml(win.label)}</th>
+          </tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="8" class="kb-empty">No machines reported.</td></tr>`}</tbody>
+      </table>
+    </div>`;
   }
 
-  const days = byDay(cycles);
-  const hours = byHour(cycles);
-  const mat = dayHourMatrix(cycles);
-
-  const bestDay = days.slice().sort((a, b) => b.parts - a.parts)[0];
-  const peakHour = hours.slice().sort((a, b) => b.parts - a.parts)[0];
-  const maxDayParts = Math.max(...days.map((d) => d.parts), 1);
-  const maxHourParts = Math.max(...hours.map((h) => h.parts), 1);
-
-  // call-outs
-  const callouts = `
-    <div class="kpi-callouts">
-      <div class="kpi-callout tone-good" data-tip-title="Best day" data-tip="${tipAttr(`${bestDay ? weekdayName(bestDay.day) + ", " + dayLabel(bestDay.day) : "—"} produced the most parts (${bestDay ? bestDay.parts : 0}) with a median cycle of ${bestDay ? fmtSec(bestDay.median) : "—"}.`)}">
-        <span class="kpi-callout-k">BEST DAY</span>
-        <span class="kpi-callout-v">${bestDay ? dayLabel(bestDay.day) : "—"}</span>
-        <span class="kpi-callout-sub">${bestDay ? bestDay.parts + " parts · " + fmtSec(bestDay.median) + " median" : ""}</span>
+  return `<section class="kb-card kb-deep">
+    <div class="kb-card-head">
+      <div class="kb-card-title-wrap">
+        <h3 class="kb-card-title">${ui.bottomTab === "heatmap" ? "Day × Hour Throughput Matrix" : "Fleet Scorecard Breakdown"}</h3>
+        <span class="kb-card-sub">${ui.bottomTab === "heatmap" ? "Real M30 completions bucketed by local day and hour" : "Click any row to isolate that machine across all charts"}</span>
       </div>
-      <div class="kpi-callout tone-good" data-tip-title="Peak hour" data-tip="${tipAttr(`Hour ${peakHour ? hourLabel(peakHour.hour) : "—"} of the day is when the fleet completes the most parts (${peakHour ? peakHour.parts : 0} across the window). Schedule the heaviest jobs here.`)}">
-        <span class="kpi-callout-k">PEAK HOUR</span>
-        <span class="kpi-callout-v">${peakHour ? hourLabel(peakHour.hour) : "—"}</span>
-        <span class="kpi-callout-sub">${peakHour ? peakHour.parts + " parts total" : ""}</span>
-      </div>
-      <div class="kpi-callout" data-tip-title="Active days" data-tip="Number of distinct local days with at least one completed part in this window.">
-        <span class="kpi-callout-k">ACTIVE DAYS</span>
-        <span class="kpi-callout-v">${days.length}</span>
-        <span class="kpi-callout-sub">${cycles.length} parts total</span>
-      </div>
-    </div>`;
-
-  // heatmap
-  const heatmap = mat.days.length ? `
-    <div class="kpi-heat">
-      <div class="kpi-heat-title">Throughput · day × hour</div>
-      <div class="kpi-heat-grid">
-        <div class="kpi-heat-corner"></div>
-        ${Array.from({ length: 24 }, (_, h) => `<div class="kpi-heat-hh">${h % 3 === 0 ? h : ""}</div>`).join("")}
-        ${mat.days.map((d) => `
-          <div class="kpi-heat-day">${dayLabel(d).replace(/,.*/, "")}</div>
-          ${mat.grid.get(d).map((v, h) => {
-            const a = mat.max ? v / mat.max : 0;
-            return `<div class="kpi-heat-cell" style="background:${heatColor(a)}" data-tip-title="${tipAttr(`${dayLabel(d)} · ${hourLabel(h)}`)}" data-tip="${tipAttr(`${v} part${v === 1 ? "" : "s"} completed.`)}"></div>`;
-          }).join("")}`).join("")}
-      </div>
-      <div class="kpi-heat-legend"><span>less</span><span class="kpi-heat-scale"></span><span>more</span></div>
-    </div>` : "";
-
-  // hourly profile bars
-  const hourBars = `
-    <div class="kpi-tim-block">
-      <div class="kpi-tim-title">Parts by hour of day</div>
-      <div class="kpi-hour-bars">
-        ${hours.map((h) => `<div class="kpi-hbar ${peakHour && h.hour === peakHour.hour ? "is-peak" : ""}" data-tip-title="${tipAttr(hourLabel(h.hour))}" data-tip="${tipAttr(`${h.parts} parts · median ${fmtSec(h.median)}`)}">
-          <span class="kpi-hbar-fill" style="height:${Math.round((h.parts / maxHourParts) * 100)}%"></span>
-          <span class="kpi-hbar-x">${h.hour % 6 === 0 ? h.hour : ""}</span>
-        </div>`).join("")}
-      </div>
-    </div>`;
-
-  // daily bars
-  const dayBars = `
-    <div class="kpi-tim-block">
-      <div class="kpi-tim-title">Parts by day</div>
-      <div class="kpi-day-bars">
-        ${days.map((d) => `<div class="kpi-dbar ${bestDay && d.day === bestDay.day ? "is-best" : ""}" data-tip-title="${tipAttr(dayLabel(d.day))}" data-tip="${tipAttr(`${d.parts} parts · median ${fmtSec(d.median)}`)}">
-          <span class="kpi-dbar-fill" style="width:${Math.round((d.parts / maxDayParts) * 100)}%"></span>
-          <span class="kpi-dbar-lab">${dayLabel(d.day).replace(/,.*/, "")}</span>
-          <span class="kpi-dbar-v">${d.parts}</span>
-        </div>`).join("")}
-      </div>
-    </div>`;
-
-  host.innerHTML = callouts + heatmap + `<div class="kpi-tim-row">${hourBars}${dayBars}</div>
-    <p class="mt-ro-note">Every cell, bar and call-out counts real completed cycles (M30) by their completion time in local clock. Best day = most parts; peak hour = the hour-of-day that totals the most parts across the window — that's your scheduling sweet spot.</p>`;
-}
-
-/* ===================== TRENDS ===================== */
-async function renderTrends(host, dataLayer, machines, win, span, current) {
-  if (!host.children.length) host.innerHTML = `<p class="ds-note">Measuring improvement…</p>`;
-  const prevWin = { key: win.key, label: "prev", from: win.from - span, to: win.from };
-  const [curB, prevB] = await Promise.all([
-    fleetBundle(dataLayer, machines, win),
-    fleetBundle(dataLayer, machines, prevWin),
-  ]);
-  if (!current()) return;
-
-  const now = fleetKpis(curB.perMachine);
-  const was = fleetKpis(prevB.perMachine);
-  const ser = kpiSeries(curB.cycles, win, 8);
-
-  const partsVerdict = ser.partsSlopePerH == null ? null : ser.partsSlopePerH > 0.05 ? "up" : ser.partsSlopePerH < -0.05 ? "down" : "flat";
-  const cycVerdict = ser.medSlopePerH == null ? null : ser.medSlopePerH < -0.3 ? "up" : ser.medSlopePerH > 0.3 ? "down" : "flat";
-
-  const verdictCard = (title, verdict, detail, tip) => {
-    const map = { up: ["tone-good", "▲ improving"], down: ["tone-bad", "▼ slipping"], flat: ["tone-warn", "→ holding"] };
-    const [tone, lab] = map[verdict] || ["", "— no read"];
-    return `<div class="kpi-verdict ${tone}" data-tip-title="${tipAttr(title)}" data-tip="${tipAttr(tip)}">
-      <span class="kpi-verdict-lab">${lab}</span><span class="kpi-verdict-k">${title}</span><span class="kpi-verdict-sub">${detail}</span></div>`;
-  };
-
-  // per-machine OEE delta vs previous
-  const prevById = new Map(prevB.perMachine.map((p) => [p.id, p.x ? p.x.oee : null]));
-  const deltas = curB.perMachine.map((p) => {
-    const cur = p.x ? p.x.oee : null, pre = prevById.get(p.id);
-    return { name: p.name, cur, delta: cur != null && pre != null ? cur - pre : null };
-  }).sort((a, b) => (b.delta ?? -999) - (a.delta ?? -999));
-
-  const head = `
-    <div class="mt-pred-head">
-      <div class="mt-pred-count ${partsVerdict === "up" ? "is-ok" : "is-warn"}"><span class="mt-pred-n">${fmtPct(now.oee)}</span><span class="mt-pred-k">fleet OEE · ${win.label}</span></div>
-      <span class="mt-pred-sub">are we improving? — Theil-Sen trends within the window and vs the previous ${win.label}</span>
-    </div>`;
-
-  const verdicts = `<div class="kpi-verdicts">
-    ${verdictCard("Throughput trend", partsVerdict, ser.partsSlopePerH == null ? "no read" : `${ser.partsSlopePerH >= 0 ? "+" : ""}${ser.partsSlopePerH.toFixed(2)} parts/h slope`,
-      "Slope of parts-per-bin across the window (8 bins). Rising = throughput building through the window.")}
-    ${verdictCard("Cycle-time trend", cycVerdict, ser.medSlopePerH == null ? "no read" : `${ser.medSlopePerH >= 0 ? "+" : ""}${ser.medSlopePerH.toFixed(2)} s/h slope`,
-      "Slope of median cycle time. Falling cycle time = improving (faster) — so down here is good.")}
-    ${verdictCard("OEE vs prev", was.oee == null || now.oee == null ? null : (now.oee - was.oee > 1 ? "up" : now.oee - was.oee < -1 ? "down" : "flat"),
-      was.oee == null ? "no prior window" : `${now.oee - was.oee >= 0 ? "+" : ""}${(now.oee - was.oee).toFixed(1)} pts`,
-      "Fleet OEE this window minus the previous equal window.")}
-  </div>`;
-
-  const spark = kpiSparkline(ser.pts);
-
-  const ladder = deltas.map((d) => {
-    const tone = d.delta == null ? "" : d.delta > 1 ? "tone-good" : d.delta < -1 ? "tone-bad" : "tone-warn";
-    const arrow = d.delta == null ? "—" : d.delta > 0 ? "▲" : d.delta < 0 ? "▼" : "→";
-    return `<div class="kpi-delta-row" data-tip-title="${tipAttr(d.name)}" data-tip="${tipAttr(`OEE now ${fmtPct(d.cur)}${d.delta == null ? "" : `, ${d.delta >= 0 ? "+" : ""}${d.delta.toFixed(1)} pts vs previous ${win.label}`}.`)}">
-      <span class="kpi-delta-name">${d.name}</span>
-      <span class="kpi-delta-cur">${fmtPct(d.cur)}</span>
-      <span class="kpi-delta-d ${tone}">${arrow} ${d.delta == null ? "" : Math.abs(d.delta).toFixed(1)}</span>
-    </div>`;
-  }).join("");
-
-  host.innerHTML = head + verdicts + `
-    <div class="kpi-trend-spark">
-      <div class="kpi-tim-title">Parts per time bin — ${win.label} (oldest → newest)</div>
-      ${spark}
+      ${tabs}
     </div>
-    <div class="kpi-delta-block">
-      <div class="kpi-tim-title">Per-machine OEE change vs previous ${win.label}</div>
-      ${ladder || `<div class="mt-pred-empty">No comparable previous window yet.</div>`}
-    </div>
-    <p class="mt-ro-note">Trends use Theil-Sen robust slopes so a couple of odd cycles don't swing the verdict. The window is split into 8 equal time bins; "improving" means more parts and/or shorter cycles as the window progresses. OEE deltas compare each machine to its own previous ${win.label}.</p>`;
+    ${bodyHtml}
+  </section>`;
 }
 
-/* ===================== shared bits ===================== */
-function trend(now, was) {
-  if (now == null || was == null) return { arrow: "", cls: "" };
-  const d = now - was;
-  if (Math.abs(d) < 0.5) return { arrow: "→", cls: "t-flat" };
-  return d > 0 ? { arrow: "▲", cls: "t-up" } : { arrow: "▼", cls: "t-down" };
-}
-
-function gauge(label, val, was, primary, tip) {
-  const t = trend(val, was);
+function radialRing(val) {
   const pct = val == null ? 0 : Math.max(0, Math.min(100, val));
-  const ring = `conic-gradient(currentColor ${pct * 3.6}deg, rgba(255,255,255,0.07) 0deg)`;
-  return `
-    <div class="kpi-gauge ${primary ? "is-primary" : ""} ${oeeClass(val)}" data-tip-title="${tipAttr(`${label} ${fmtPct(val)}`)}" data-tip="${tipAttr(tip || "")}">
-      <div class="kpi-ring" style="background:${ring}"><span class="kpi-ring-v">${fmtPct(val)}</span></div>
-      <div class="kpi-gauge-foot">
-        <span class="kpi-gauge-label">${label}</span>
-        <span class="kpi-trend ${t.cls}" title="change vs previous window, in percentage points">${t.arrow} ${was == null ? "" : `${Math.abs((val || 0) - was).toFixed(1)} pts`}</span>
-      </div>
-    </div>`;
+  const r = 14.5;
+  const circ = 2 * Math.PI * r;
+  const dash = (pct / 100) * circ;
+  const stroke = val == null ? "#64748b" : val >= 70 ? "#22c55e" : val >= 45 ? "#f59e0b" : "#f43f5e";
+  return `<svg class="kb-ring-svg" viewBox="0 0 36 36" aria-label="OEE ${fmtPctInt(val)}">
+    <circle class="kb-ring-bg" cx="18" cy="18" r="${r}" />
+    <circle class="kb-ring-fg" cx="18" cy="18" r="${r}" stroke="${stroke}"
+      stroke-dasharray="${dash.toFixed(2)} ${circ.toFixed(2)}" />
+    <text class="kb-ring-txt" x="18" y="18">${val == null ? "—" : Math.round(val)}</text>
+  </svg>`;
 }
 
-function kpiSparkline(pts) {
-  const vals = pts.map((p) => p.parts);
-  const max = Math.max(...vals, 1);
-  const w = 100, n = pts.length;
-  return `<div class="kpi-spark-bars">
-    ${pts.map((p) => `<div class="kpi-spark-bar" data-tip-title="${tipAttr(new Date(p.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit" }))}" data-tip="${tipAttr(`${p.parts} parts · median ${fmtSec(p.median)}`)}">
-      <span style="height:${Math.round((p.parts / max) * 100)}%"></span></div>`).join("")}
+function miniBar(val, color) {
+  const pct = val == null ? 0 : Math.max(0, Math.min(100, val));
+  return `<div class="kb-mini-metric">
+    <span class="kb-mini-track"><span class="kb-mini-fill" style="width:${pct.toFixed(1)}%;background:${color}"></span></span>
+    <span class="kb-mini-val">${fmtPctInt(val)}</span>
   </div>`;
 }
 
-function hourLabel(h) { const ap = h < 12 ? "am" : "pm"; const hr = h % 12 === 0 ? 12 : h % 12; return `${hr}${ap}`; }
-function heatColor(a) {
-  // 0 -> faint panel, 1 -> accent. perceptual-ish ramp on the accent hue.
-  if (a <= 0) return "rgba(148,163,184,0.06)";
-  return `rgba(56,189,248,${(0.12 + a * 0.85).toFixed(3)})`;
+function niceCeil(n) {
+  if (n <= 4) return 4;
+  if (n <= 10) return Math.ceil(n / 2) * 2;
+  const mag = Math.pow(10, Math.floor(Math.log10(n)));
+  const norm = n / mag;
+  const step = norm <= 1.2 ? 1.2 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return Math.ceil(n / (step * mag / 4)) * (step * mag / 4);
 }
-function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function hourLabel(h) {
+  const ap = h < 12 ? "am" : "pm";
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return `${hr}${ap}`;
+}
+
+function heatColor(a) {
+  if (a <= 0) return "var(--kb-track)";
+  if (a < 0.25) return "rgba(59, 130, 246, 0.28)";
+  if (a < 0.5) return "rgba(59, 130, 246, 0.52)";
+  if (a < 0.75) return "rgba(99, 102, 241, 0.78)";
+  return "#3b82f6";
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}

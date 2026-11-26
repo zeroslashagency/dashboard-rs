@@ -1,0 +1,429 @@
+/* ==========================================================================
+   Style 1 — Mechanical Split-Flap NC PARTS Counter
+   Brushed titanium bezel, dual+ hinged 3D airport split-flap digit cards
+   with metallic center hinge pins, emerald status LED, and etched footer.
+   Strictly scoped to .machine-card-box-parts; OVERRIDES left untouched.
+   ========================================================================== */
+
+.machine-card-box.machine-card-box-parts {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 7px 9px 6px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.022) 0px,
+      rgba(255, 255, 255, 0.022) 1px,
+      rgba(0, 0, 0, 0.03) 1px,
+      rgba(0, 0, 0, 0.03) 2px
+    ),
+    linear-gradient(180deg, #4c525c 0%, #343942 46%, #242830 100%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.30),
+    inset 0 -1.5px 0 rgba(0, 0, 0, 0.55),
+    0 6px 16px rgba(0, 0, 0, 0.34);
+  color: #f8fafc;
+  isolation: isolate;
+  transition:
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s ease,
+    border-color 0.22s ease;
+}
+
+/* Light theme: satin brushed aluminum bezel keeping dark slate flaps razor-crisp */
+[data-theme="light"] .machine-card-box.machine-card-box-parts {
+  border-color: rgba(15, 23, 42, 0.16);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.08) 0px,
+      rgba(255, 255, 255, 0.08) 1px,
+      rgba(15, 23, 42, 0.02) 1px,
+      rgba(15, 23, 42, 0.02) 2px
+    ),
+    linear-gradient(180deg, #e2e7ee 0%, #c8d0db 50%, #b3bcc9 100%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.82),
+    inset 0 -1.5px 0 rgba(15, 23, 42, 0.18),
+    0 6px 14px rgba(15, 23, 42, 0.14);
+  color: #1e293b;
+}
+
+@media (hover: hover) {
+  .machine-card-box.machine-card-box-parts.is-ranked:hover {
+    border-color: rgba(255, 255, 255, 0.32);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.38),
+      inset 0 -1.5px 0 rgba(0, 0, 0, 0.58),
+      0 8px 20px rgba(0, 0, 0, 0.42);
+  }
+  [data-theme="light"] .machine-card-box.machine-card-box-parts.is-ranked:hover {
+    border-color: rgba(15, 23, 42, 0.28);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.90),
+      inset 0 -1.5px 0 rgba(15, 23, 42, 0.22),
+      0 8px 18px rgba(15, 23, 42, 0.18);
+  }
+}
+
+/* Keep canvas present in DOM for cycle-stage tracking without flooding the bezel */
+.machine-card-box-parts .parts-water-canvas {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- Top Bezel Header: NC PARTS + Machined Status LED ---------- */
+.sf-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.machine-card-box-parts .sf-head .machine-card-box-label {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: rgba(241, 245, 249, 0.88);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-theme="light"] .machine-card-box-parts .sf-head .machine-card-box-label {
+  color: rgba(15, 23, 42, 0.78);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+/* Recessed metallic bezel LED indicator */
+.sf-led {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #94a3b8 0%, #475569 62%, #1e293b 100%);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+.machine-card-box-parts[data-led="live"] .sf-led {
+  background: radial-gradient(circle at 34% 30%, #dcfce7 0%, #4ade80 48%, #15803d 100%);
+  box-shadow:
+    0 0 0 1.5px rgba(0, 0, 0, 0.48),
+    0 0 7px 1.5px rgba(74, 222, 128, 0.72);
+}
+.machine-card-box-parts[data-led="paused"] .sf-led {
+  background: radial-gradient(circle at 34% 30%, #fef3c7 0%, #fbbf24 50%, #b45309 100%);
+  box-shadow:
+    0 0 0 1.5px rgba(0, 0, 0, 0.48),
+    0 0 7px 1.5px rgba(251, 191, 36, 0.68);
+}
+.machine-card-box-parts[data-fill="hot"] .sf-led,
+.machine-card-box-parts[data-fill="full"] .sf-led,
+.machine-card-box-parts.is-clack .sf-led {
+  background: radial-gradient(circle at 34% 30%, #ffffff 0%, #86efac 42%, #22c55e 100%);
+  box-shadow:
+    0 0 0 1.5px rgba(0, 0, 0, 0.45),
+    0 0 11px 3px rgba(74, 222, 128, 0.95);
+}
+
+/* Override legacy full-fill dark-ink flip so numerals stay snow-white on dark flaps */
+.machine-card-box-parts[data-fill="full"] .machine-card-box-value,
+.machine-card-box-parts[data-fill="full"] .machine-card-box-label {
+  color: rgba(241, 245, 249, 0.92);
+}
+[data-theme="light"] .machine-card-box-parts[data-fill="full"] .machine-card-box-label {
+  color: rgba(15, 23, 42, 0.85);
+}
+
+/* ---------- Screen-reader / Unit-Test Synced Value ---------- */
+.machine-card-box-parts .machine-card-parts-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0;
+}
+.sf-sr-val {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Split-Flap Drum Well & Individual Hinged Digit Cards ---------- */
+.sf-board {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 5px;
+  perspective: 260px;
+}
+
+.sf-slot {
+  --sf-h: 46px;
+  --sf-fs: clamp(1.95rem, 2.05vw, 2.45rem);
+
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 56px;
+  height: var(--sf-h);
+  border-radius: 7px;
+  padding: 2px;
+  background: #0d1015;
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.92),
+    0 1px 0 rgba(255, 255, 255, 0.16);
+  perspective: 220px;
+}
+
+/* Responsive sizing when count grows to 3 or 4+ digits */
+.sf-board[data-cols="3"] { gap: 4px; }
+.sf-board[data-cols="3"] .sf-slot {
+  --sf-h: 42px;
+  --sf-fs: clamp(1.55rem, 1.65vw, 2.0rem);
+  max-width: 42px;
+}
+.sf-board[data-cols="4"] { gap: 3px; }
+.sf-board[data-cols="4"] .sf-slot {
+  --sf-h: 38px;
+  --sf-fs: clamp(1.25rem, 1.35vw, 1.65rem);
+  max-width: 34px;
+}
+.sf-board[data-cols="5"] { gap: 2px; }
+.sf-board[data-cols="5"] .sf-slot {
+  --sf-h: 36px;
+  --sf-fs: clamp(1.05rem, 1.12vw, 1.38rem);
+  max-width: 28px;
+}
+
+.sf-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  overflow: hidden;
+  transform-style: preserve-3d;
+}
+
+/* Shared half-flap typography & card geometry */
+.sf-half {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.sf-glyph {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 200%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: var(--sf-fs);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #f8fafc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  user-select: none;
+}
+
+/* Top static half */
+.sf-top {
+  top: 0;
+  border-radius: 5px 5px 0 0;
+  background: linear-gradient(180deg, #3a4351 0%, #2a313c 96%, #1c2129 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.sf-top .sf-glyph { top: 0; }
+
+/* Bottom static half */
+.sf-bot {
+  bottom: 0;
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(180deg, #272d38 0%, #2f3744 26%, #222832 100%);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+}
+.sf-bot .sf-glyph { top: -100%; }
+
+/* Muted dash state when offline/unknown */
+.sf-slot[data-muted="1"] .sf-glyph {
+  color: rgba(148, 163, 184, 0.48);
+}
+
+/* Center mechanical horizontal split slit */
+.sf-slit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  z-index: 5;
+  background: #080a0e;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.11);
+  pointer-events: none;
+}
+
+/* Tiny machined metallic side hinge pins (left & right) */
+.sf-hinge-l,
+.sf-hinge-r {
+  position: absolute;
+  top: 50%;
+  width: 3.5px;
+  height: 9px;
+  margin-top: -4.5px;
+  z-index: 6;
+  border-radius: 1.5px;
+  background: linear-gradient(180deg, #94a3b8 0%, #e2e8f0 32%, #475569 72%, #1e293b 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.78);
+  pointer-events: none;
+}
+.sf-hinge-l { left: 1px; }
+.sf-hinge-r { right: 1px; }
+
+/* ---------- Kinetic 3D Flipping Leaves ---------- */
+.sf-leaf-top,
+.sf-leaf-bot {
+  display: none;
+  z-index: 3;
+  will-change: transform;
+}
+
+.sf-leaf-top {
+  top: 0;
+  border-radius: 5px 5px 0 0;
+  transform-origin: 50% 100%;
+  background: linear-gradient(180deg, #3c4554 0%, #2a313c 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+.sf-leaf-top .sf-glyph { top: 0; }
+
+.sf-leaf-bot {
+  bottom: 0;
+  border-radius: 0 0 5px 5px;
+  transform-origin: 50% 0%;
+  transform: rotateX(90deg);
+  background: linear-gradient(180deg, #2b323f 0%, #343d4b 30%, #242a35 100%);
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.42);
+}
+.sf-leaf-bot .sf-glyph { top: -100%; }
+
+.sf-slot.is-flipping .sf-leaf-top {
+  display: block;
+  z-index: 4;
+  animation: sf-flip-top 0.19s cubic-bezier(0.55, 0.05, 0.85, 0.35) var(--sf-delay, 0ms) 1 forwards;
+}
+.sf-slot.is-flipping .sf-leaf-bot {
+  display: block;
+  z-index: 4;
+  animation: sf-flip-bot 0.21s cubic-bezier(0.18, 0.88, 0.32, 1.06) calc(var(--sf-delay, 0ms) + 185ms) 1 forwards;
+}
+
+@keyframes sf-flip-top {
+  0% {
+    transform: rotateX(0deg);
+    filter: brightness(1);
+  }
+  100% {
+    transform: rotateX(-90deg);
+    filter: brightness(0.58);
+  }
+}
+
+@keyframes sf-flip-bot {
+  0% {
+    transform: rotateX(90deg);
+    filter: brightness(0.68);
+  }
+  82% {
+    transform: rotateX(-4deg);
+    filter: brightness(1.06);
+  }
+  100% {
+    transform: rotateX(0deg);
+    filter: brightness(1);
+  }
+}
+
+/* ---------- Bottom Etched Footer Rail (Last Part Change Time) ---------- */
+.machine-card-box-parts > .machine-card-box-note {
+  position: relative;
+  z-index: 2;
+  margin-top: 0;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: clamp(0.70rem, 0.72vw, 0.84rem);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(203, 213, 225, 0.86);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.25s ease;
+}
+[data-theme="light"] .machine-card-box-parts > .machine-card-box-note {
+  color: rgba(15, 23, 42, 0.76);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+.machine-card-box-parts.is-clack > .machine-card-box-note {
+  color: #86efac;
+}
+[data-theme="light"] .machine-card-box-parts.is-clack > .machine-card-box-note {
+  color: #15803d;
+}
+
+/* Compact TV wall-board proportions */
+html[data-tv][data-tv-compact] .sf-slot {
+  --sf-h: 36px;
+  --sf-fs: clamp(1.3rem, 4.2cqi, 1.9rem);
+}
+html[data-tv][data-tv-compact] .machine-card-box.machine-card-box-parts {
+  padding: 5px 7px 4px;
+  gap: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .machine-card-box.machine-card-box-parts,
+  .sf-led {
+    transition: none !important;
+  }
+  .sf-slot.is-flipping .sf-leaf-top,
+  .sf-slot.is-flipping .sf-leaf-bot {
+    animation: none !important;
+    display: none !important;
+  }
+}

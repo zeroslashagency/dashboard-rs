@@ -86,12 +86,11 @@
     shiftTzLabel: "IST",
 
     // ---- presentation ------------------------------------------------------
-    // Whole-board scale. `zoom` scales layout boxes, hard px values AND canvas
-    // backing stores together, which a root font-size bump cannot do: this app
-    // has fluid clamp() type in cards.css, hard px in godmode.css, and canvas
-    // text drawn at 11px in timeline.js. Those three need one lever, not three.
-    // 0 = auto: derived from viewport width so a 4K panel does not render the
-    // board physically smaller than the same 1080p panel did.
+    // Automatically choose the best cards-per-screen grid and uniform scale
+    // factor for the active viewport while locking natural card proportions.
+    autoFit: true,
+
+    // Whole-board scale (used in Custom fit mode; 0 = auto uniform fit).
     zoom: 0,
 
     // Hide the footer and trim the header to a wall-appropriate strip.
@@ -139,6 +138,7 @@
 
     num("perPage", "perPage");
     num("zoom", "zoom");
+    bool("autoFit", "autoFit");
     bool("clock", "showClock");
     bool("chrome", "chrome");
     bool("skipDead", "skipDead");
@@ -241,22 +241,28 @@
 
   resolveCfg();
 
-  // Re-validate after the localStorage layer: a zone saved by an older build,
-  // or hand-edited storage, can still be junk.
-  if (!isValidZone(cfg.tz)) cfg.tz = DEFAULTS.tz;
-  if (!isValidZone(cfg.shiftTz)) cfg.shiftTz = DEFAULTS.shiftTz;
-  if (!Array.isArray(cfg.machines)) cfg.machines = [];
-  if (!Array.isArray(cfg.exclude)) cfg.exclude = [];
-  if (!Array.isArray(cfg.playlist) || !cfg.playlist.length) {
-    cfg.playlist = DEFAULTS.playlist;
+  function sanitizeCfg() {
+    if (cfg.tz !== "local" && !isValidZone(cfg.tz)) cfg.tz = DEFAULTS.tz;
+    if (!isValidZone(cfg.shiftTz)) cfg.shiftTz = DEFAULTS.shiftTz;
+    if (!Array.isArray(cfg.machines)) cfg.machines = [];
+    if (!Array.isArray(cfg.exclude)) cfg.exclude = [];
+    if (!Array.isArray(cfg.playlist) || !cfg.playlist.length) {
+      cfg.playlist = DEFAULTS.playlist.map(function (s) { return { view: s.view, dwell: s.dwell }; });
+    }
+    if (!isFinite(cfg.perPage) || cfg.perPage < 0) cfg.perPage = DEFAULTS.perPage;
+    cfg.autoFit = cfg.autoFit !== false;
+    cfg.machines = cfg.machines.map(function (s) { return String(s).toUpperCase(); });
+    cfg.exclude = cfg.exclude.map(function (s) { return String(s).toUpperCase(); });
   }
-  if (!isFinite(cfg.perPage) || cfg.perPage < 0) cfg.perPage = DEFAULTS.perPage;
 
-  cfg.machines = cfg.machines.map(function (s) { return String(s).toUpperCase(); });
-  cfg.exclude = cfg.exclude.map(function (s) { return String(s).toUpperCase(); });
+  sanitizeCfg();
 
   window.__VMC_TV_CFG__ = cfg;
   window.__VMC_TV_CFG_DEFAULTS__ = DEFAULTS;
+  window.__VMC_TV_CFG_UTIL__ = {
+    isValidZone: isValidZone,
+    zoneAbbrev: zoneAbbrev,
+  };
 
   // Persist a patch in the selected scope. Device overrides win at render.
   window.__VMC_TV_CFG_SAVE__ = function (patch, scope) {
@@ -265,6 +271,7 @@
       var next = merge(readSaved(scope === "global" ? "global" : "device"), patch);
       localStorage.setItem(key, JSON.stringify(next));
       resolveCfg();
+      sanitizeCfg();
       return true;
     } catch (_) {
       return false;
@@ -279,10 +286,10 @@
     try {
       localStorage.removeItem(scope === "global" ? GLOBAL_KEY : DEVICE_KEY);
       if (scope !== "global") {
-        // The pre-Slice key from the original tv.js, removed so a stale 10s dwell
-        // cannot outlive a reset.
         localStorage.removeItem("vmc_tv_interval");
       }
+      resolveCfg();
+      sanitizeCfg();
       return true;
     } catch (_) {
       return false;

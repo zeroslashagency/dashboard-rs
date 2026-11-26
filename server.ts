@@ -17,22 +17,8 @@ export interface ServerConfig {
 }
 
 export const KIOSK_SNIPPET =
-  '<style id="vmc-tv">' +
-  "html[data-tv] .godnav," +
-  "html[data-tv] .topbar .cfg-btn{display:none!important}" +
-  "html[data-tv] body{overflow:auto;margin:0;background:#0b1120}" +
-  "html[data-tv] main{padding:0!important;margin:0!important}" +
-  "html[data-tv] .machine-grid{gap:16px;padding:16px}" +
-  "</style>" +
   "<script>document.documentElement.setAttribute('data-tv','1');" +
-  "window.__VMC_TV__=true;" +
-  "(function(){var strip=function(){" +
-  "document.querySelectorAll('.godnav,.topbar .cfg-btn')" +
-  ".forEach(function(el){el.style.display='none';});};" +
-  "if(document.readyState!=='loading')strip();" +
-  "document.addEventListener('DOMContentLoaded',strip);" +
-  "try{new MutationObserver(strip).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}" +
-  "})();</script>";
+  "window.__VMC_TV_BOOT__=true;</script>";
 
 function parsePort(raw: string | undefined): number | null {
   if (!raw || !raw.trim()) return null;
