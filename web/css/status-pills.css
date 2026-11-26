@@ -1,0 +1,472 @@
+/* ============================================================================
+ * VMC STATUS PILLS — STYLE B (Frosted Pastel + Uniform Circled Icons)
+ * Single source of truth for every status pill across the entire dashboard:
+ *   • Machine cards (desktop, TV wall, compact 3×2)
+ *   • Header connection badge & fleet summary chips
+ *   • God-mode confidence badges (Analytics, KPI, Maintenance, Statistics, DataLab)
+ *   • Alert toasts & alert log severity + confidence pills
+ *   • 3D Digital Twin HUD live/replay pill & readout status pills
+ *   • Maintenance timeline chips & tool-wear tags
+ *
+ * Auto-adapts seamlessly between Dark Mode (frosted jewel-toned obsidian glass
+ * with luminous rim & soft halo) and Light Mode (glossy bevelled pastel glass).
+ * ==========================================================================*/
+
+:root,
+[data-theme="dark"] {
+  --sp-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.24) 0%,
+    rgba(255, 255, 255, 0.05) 46%,
+    rgba(0, 0, 0, 0.14) 100%
+  );
+  --sp-inset:
+    inset 0 1px 0.5px rgba(255, 255, 255, 0.36),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.34);
+  --sp-drop: 0 2px 8px rgba(0, 0, 0, 0.36);
+
+  /* Emerald — running / ok / good */
+  --sp-green-top: rgba(30, 102, 72, 0.93);
+  --sp-green-bot: rgba(16, 62, 43, 0.97);
+  --sp-green-bdr: #62e3a8;
+  --sp-green-ink: #ccfbe2;
+  --sp-green-glow: rgba(52, 211, 153, 0.30);
+
+  /* Sky Indigo — idle / info */
+  --sp-blue-top: rgba(46, 74, 138, 0.93);
+  --sp-blue-bot: rgba(26, 44, 88, 0.97);
+  --sp-blue-bdr: #8eb2ff;
+  --sp-blue-ink: #e0ebff;
+  --sp-blue-glow: rgba(126, 166, 248, 0.30);
+
+  /* Amber Peach — paused / manual / warn / replay / hold */
+  --sp-amber-top: rgba(118, 80, 26, 0.93);
+  --sp-amber-bot: rgba(76, 49, 13, 0.97);
+  --sp-amber-bdr: #f6c05e;
+  --sp-amber-ink: #feefc9;
+  --sp-amber-glow: rgba(251, 191, 36, 0.28);
+
+  /* Rose Crimson — alarm / e-stop / critical / bad / error */
+  --sp-red-top: rgba(128, 39, 49, 0.94);
+  --sp-red-bot: rgba(82, 20, 28, 0.98);
+  --sp-red-bdr: #f48c95;
+  --sp-red-ink: #ffdde0;
+  --sp-red-glow: rgba(248, 113, 113, 0.38);
+  --sp-red-ico-fill: #f87171;
+  --sp-red-ico-ring: #fca5a5;
+  --sp-red-ico-cutout: #2e0a10;
+
+  /* Silver Slate — offline / unavailable / unknown / expired */
+  --sp-gray-top: rgba(74, 82, 96, 0.93);
+  --sp-gray-bot: rgba(45, 50, 60, 0.97);
+  --sp-gray-bdr: #b8c1cf;
+  --sp-gray-ink: #eef1f6;
+  --sp-gray-glow: rgba(148, 163, 184, 0.22);
+
+  /* Luminous Cyan — live */
+  --sp-cyan-top: rgba(18, 116, 140, 0.93);
+  --sp-cyan-bot: rgba(10, 72, 92, 0.97);
+  --sp-cyan-bdr: #52e8ff;
+  --sp-cyan-ink: #d8f9ff;
+  --sp-cyan-glow: rgba(56, 232, 255, 0.36);
+}
+
+[data-theme="light"] {
+  --sp-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72) 0%,
+    rgba(255, 255, 255, 0.16) 46%,
+    rgba(15, 23, 42, 0.04) 100%
+  );
+  --sp-inset:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.92),
+    inset 0 -1px 2px rgba(15, 23, 42, 0.08);
+  --sp-drop: 0 2px 6px rgba(15, 23, 42, 0.10);
+
+  /* Emerald */
+  --sp-green-top: #d6fbe4;
+  --sp-green-bot: #aaf0c5;
+  --sp-green-bdr: #47ba72;
+  --sp-green-ink: #136d35;
+  --sp-green-glow: rgba(34, 197, 94, 0.16);
+
+  /* Sky Indigo */
+  --sp-blue-top: #dce8ff;
+  --sp-blue-bot: #bdd3ff;
+  --sp-blue-bdr: #6b95f2;
+  --sp-blue-ink: #1e42af;
+  --sp-blue-glow: rgba(99, 136, 245, 0.16);
+
+  /* Amber Peach */
+  --sp-amber-top: #feecc8;
+  --sp-amber-bot: #fcd792;
+  --sp-amber-bdr: #e4a33f;
+  --sp-amber-ink: #a35308;
+  --sp-amber-glow: rgba(245, 158, 11, 0.16);
+
+  /* Rose Crimson */
+  --sp-red-top: #fddde0;
+  --sp-red-bot: #f9b9c1;
+  --sp-red-bdr: #df7480;
+  --sp-red-ink: #b51c26;
+  --sp-red-glow: rgba(239, 68, 68, 0.20);
+  --sp-red-ico-fill: transparent;
+  --sp-red-ico-ring: currentColor;
+  --sp-red-ico-cutout: currentColor;
+
+  /* Cool Silver Gray */
+  --sp-gray-top: #edf0f4;
+  --sp-gray-bot: #d7dce4;
+  --sp-gray-bdr: #a3acb9;
+  --sp-gray-ink: #1f2937;
+  --sp-gray-glow: rgba(100, 116, 139, 0.14);
+
+  /* Luminous Cyan */
+  --sp-cyan-top: #c8f6fe;
+  --sp-cyan-bot: #8ce9fa;
+  --sp-cyan-bdr: #26b8d4;
+  --sp-cyan-ink: #0b586b;
+  --sp-cyan-glow: rgba(14, 165, 233, 0.18);
+}
+
+/* ===== Shared Style B Capsule Geometry ===== */
+.status-pill,
+.chip,
+.conn,
+.ds-conf,
+.ds-row-conf,
+.ds-flag,
+.alert-conf,
+.alert-toast-sev,
+.alert-row-sev,
+.td-hud-badge,
+.td-ro-status,
+.mt-tl-chip,
+.mt-tool-tag,
+.stat-sub.conf-bad {
+  --sp-bg-top: var(--sp-gray-top);
+  --sp-bg-bot: var(--sp-gray-bot);
+  --sp-bdr: var(--sp-gray-bdr);
+  --sp-ink: var(--sp-gray-ink);
+  --sp-glow: var(--sp-gray-glow);
+  --sp-ico-fill: transparent;
+  --sp-ico-ring: currentColor;
+  --sp-ico-cutout: currentColor;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42em;
+  border-radius: 999px;
+  border: 1.5px solid var(--sp-bdr);
+  background:
+    var(--sp-sheen),
+    linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+  color: var(--sp-ink);
+  box-shadow:
+    var(--sp-inset),
+    var(--sp-drop),
+    0 0 10px var(--sp-glow);
+  white-space: nowrap;
+  line-height: 1;
+  vertical-align: middle;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+/* Inner icon + label layout */
+.sp-pill-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.18em;
+  height: 1.18em;
+}
+.sp-ico {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+.sp-pill-lbl {
+  display: inline-block;
+  line-height: 1;
+}
+
+/* ===== Semantic Color Mappings ===== */
+
+/* Emerald — RUNNING / OK / GOOD / GAPLESS */
+.status-pill.status-running,
+.chip.running,
+.ds-conf.conf-ok,
+.ds-row-conf.conf-ok,
+.ds-flag.ds-flag-ok,
+.alert-conf.is-ok,
+.td-ro-status.st-running,
+.mt-tl-chip.kind-program {
+  --sp-bg-top: var(--sp-green-top);
+  --sp-bg-bot: var(--sp-green-bot);
+  --sp-bdr: var(--sp-green-bdr);
+  --sp-ink: var(--sp-green-ink);
+  --sp-glow: var(--sp-green-glow);
+  color: var(--sp-ink);
+  border-color: var(--sp-bdr);
+  background: var(--sp-sheen), linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+}
+
+/* Sky Indigo — IDLE / INFO / TOOL */
+.status-pill.status-idle,
+.chip.idle,
+.alert-toast.sev-info .alert-toast-sev,
+.alert-row.sev-info .alert-row-sev,
+.td-ro-status.st-idle,
+.mt-tl-chip.kind-tool {
+  --sp-bg-top: var(--sp-blue-top);
+  --sp-bg-bot: var(--sp-blue-bot);
+  --sp-bdr: var(--sp-blue-bdr);
+  --sp-ink: var(--sp-blue-ink);
+  --sp-glow: var(--sp-blue-glow);
+  color: var(--sp-ink);
+  border-color: var(--sp-bdr);
+  background: var(--sp-sheen), linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+}
+
+/* Amber Peach — PAUSED / SETUP / WARN / WARNING / REPLAY / HOLD / WATCH */
+.status-pill.status-paused,
+.status-pill.status-setup_manual,
+.ds-conf.conf-warn,
+.ds-row-conf.conf-warn,
+.alert-conf.is-bad,
+.alert-toast.sev-warning .alert-toast-sev,
+.alert-row.sev-warning .alert-row-sev,
+.td-hud-badge.is-replay,
+.td-ro-status.st-paused,
+.td-ro-status.st-setup_manual,
+.mt-tl-chip.kind-hold,
+.mt-tool.is-warn .mt-tool-tag {
+  --sp-bg-top: var(--sp-amber-top);
+  --sp-bg-bot: var(--sp-amber-bot);
+  --sp-bdr: var(--sp-amber-bdr);
+  --sp-ink: var(--sp-amber-ink);
+  --sp-glow: var(--sp-amber-glow);
+  color: var(--sp-ink);
+  border-color: var(--sp-bdr);
+  background: var(--sp-sheen), linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+}
+
+/* Rose Crimson — ALARM / E-STOP / CRITICAL / BAD / ERROR / REPLACE */
+.status-pill.status-alarm,
+.status-pill.status-e_stop,
+.chip.alarm,
+.conn.down,
+.ds-conf.conf-bad,
+.ds-row-conf.conf-bad,
+.ds-flag.ds-flag-bad,
+.alert-toast.sev-critical .alert-toast-sev,
+.alert-row.sev-critical .alert-row-sev,
+.td-ro-status.st-alarm,
+.td-ro-status.st-e_stop,
+.mt-tl-chip.kind-alarm,
+.mt-tl-chip.kind-estop,
+.mt-tool.is-bad .mt-tool-tag,
+.stat-sub.conf-bad {
+  --sp-bg-top: var(--sp-red-top);
+  --sp-bg-bot: var(--sp-red-bot);
+  --sp-bdr: var(--sp-red-bdr);
+  --sp-ink: var(--sp-red-ink);
+  --sp-glow: var(--sp-red-glow);
+  --sp-ico-fill: var(--sp-red-ico-fill);
+  --sp-ico-ring: var(--sp-red-ico-ring);
+  --sp-ico-cutout: var(--sp-red-ico-cutout);
+  color: var(--sp-ink);
+  border-color: var(--sp-bdr);
+  background: var(--sp-sheen), linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+}
+
+/* Cool Silver Gray — OFFLINE / UNAVAILABLE / UNKNOWN */
+.status-pill.status-offline,
+.status-pill.status-unavailable,
+.status-pill.status-unknown,
+.chip.offline,
+.td-ro-status.st-offline,
+.td-ro-status.st-unavailable,
+.td-ro-status.st-unknown {
+  --sp-bg-top: var(--sp-gray-top);
+  --sp-bg-bot: var(--sp-gray-bot);
+  --sp-bdr: var(--sp-gray-bdr);
+  --sp-ink: var(--sp-gray-ink);
+  --sp-glow: var(--sp-gray-glow);
+  color: var(--sp-ink);
+  border-color: var(--sp-bdr);
+  background: var(--sp-sheen), linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+}
+
+/* Luminous Cyan — LIVE */
+.conn.live,
+.td-hud-badge.is-live {
+  --sp-bg-top: var(--sp-cyan-top);
+  --sp-bg-bot: var(--sp-cyan-bot);
+  --sp-bdr: var(--sp-cyan-bdr);
+  --sp-ink: var(--sp-cyan-ink);
+  --sp-glow: var(--sp-cyan-glow);
+  color: var(--sp-ink);
+  border-color: var(--sp-bdr);
+  background: var(--sp-sheen), linear-gradient(180deg, var(--sp-bg-top) 0%, var(--sp-bg-bot) 100%);
+}
+
+/* ===== Proportional Size Tiers ===== */
+
+/* Tier 1 (md): Machine Card Eyebrow Pill (Desktop & Full TV Wall) */
+.status-pill {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: none;
+  padding: 5px 12px 5px 9px;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: clamp(0.86rem, 0.88vw, 1.08rem);
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  opacity: 1;
+}
+.status-pill .sp-pill-ico {
+  width: 1.22em;
+  height: 1.22em;
+}
+
+/* Tier 2 (sm): Header summary chips, connection pill, God-mode header confidence */
+.chip {
+  padding: 5px 12px 5px 9px;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
+}
+.chip .chip-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.92;
+  margin-left: 1px;
+}
+
+.conn {
+  padding: 5px 12px 5px 9px;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.84rem;
+  letter-spacing: 0.02em;
+}
+.conn .conn-text {
+  color: inherit;
+}
+
+.ds-conf {
+  padding: 5px 12px 5px 9px;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+}
+
+/* Tier 3 (xs): Dense table / alert / HUD / maintenance pills */
+.ds-row-conf,
+.ds-flag,
+.alert-conf,
+.alert-toast-sev,
+.alert-row-sev,
+.td-hud-badge,
+.td-ro-status,
+.mt-tl-chip,
+.mt-tool-tag,
+.stat-sub.conf-bad {
+  padding: 3px 9px 3px 6px;
+  gap: 5px;
+  border-width: 1.25px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.td-hud-badge {
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  padding: 3px 9px 3px 6px;
+}
+
+.td-ro-status {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  padding: 2.5px 8px 2.5px 6px;
+}
+
+.alert-toast-sev {
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  padding: 3px 8px 3px 6px;
+}
+
+.alert-row {
+  grid-template-columns: minmax(82px, auto) 1fr auto;
+}
+.alert-row-sev {
+  justify-self: start;
+  font-size: 0.64rem;
+  padding: 2.5px 8px 2.5px 5.5px;
+}
+
+.mt-tl-chip {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  padding: 3.5px 10px 3.5px 7px;
+  text-transform: capitalize;
+}
+
+.mt-tool-tag {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  padding: 2.5px 8px 2.5px 5.5px;
+}
+
+.stat-sub.conf-bad {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+/* ===== Active Motion: RUNNING spinner + ALARM pulse ONLY ===== */
+@keyframes sp-pill-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sp-pill-alarm-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.72;
+  }
+}
+
+.sp-ico--spin {
+  animation: sp-pill-spin 1.35s linear infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+.sp-ico--alarm {
+  animation: sp-pill-alarm-pulse 1.5s ease-in-out infinite;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+
+/* Static crisp glyphs when reduced motion is preferred */
+@media (prefers-reduced-motion: reduce) {
+  .sp-ico--spin,
+  .sp-ico--alarm {
+    animation: none !important;
+  }
+}

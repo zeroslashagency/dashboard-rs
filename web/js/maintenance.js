@@ -151,7 +151,7 @@ function overviewCard(h) {
           <div class="mt-tool ${t.mag >= WEAR_LIMIT ? "is-bad" : "is-warn"}" data-tip-title="${tipAttr(`${h.id} · Tool T${t.slot} — ${tag.toUpperCase()}`)}" data-tip="${tip}">
             <span class="mt-tool-slot">T${t.slot}</span>
             <span class="mt-tool-wear">Ø${sgn(t.diam)} L${sgn(t.len)}</span>
-            <span class="mt-tool-tag">${tag}</span>
+            <span class="mt-tool-tag">${window.VMCStatusPill ? window.VMCStatusPill.innerMarkup(t.mag >= WEAR_LIMIT ? "bad" : "warn", tag) : tag}</span>
           </div>`;
         }).join("");
 
@@ -315,7 +315,13 @@ async function renderTimeline(host, dataLayer, last, current = () => true) {
   events.sort((a, b) => b.ts - a.ts);
 
   const counts = events.reduce((acc, e) => { acc[e.kind] = (acc[e.kind] || 0) + 1; return acc; }, {});
-  const chip = (k, lab) => `<span class="mt-tl-chip kind-${k}">${KIND_ICON[k] || ""} ${lab} ${counts[k] || 0}</span>`;
+  const chip = (k, lab) => {
+    const label = `${lab} ${counts[k] || 0}`;
+    const inner = window.VMCStatusPill
+      ? window.VMCStatusPill.innerMarkup(k, label)
+      : `${KIND_ICON[k] || ""} ${label}`;
+    return `<span class="mt-tl-chip kind-${k}">${inner}</span>`;
+  };
   const head = `
     <div class="mt-tl-head">
       <span class="mt-ro-kicker">MAINTENANCE LOG · ${last.win.label}</span>

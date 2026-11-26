@@ -94,7 +94,7 @@ function renderErrorCard(host, cards, id, m, err) {
     root.innerHTML = `
       <div class="stat-card-head">
         <span data-f="name"></span>
-        <span class="stat-sub conf-bad" role="status">ERROR</span>
+        <span class="stat-sub conf-bad" role="status">${window.VMCStatusPill ? window.VMCStatusPill.innerMarkup("error", "ERROR") : "ERROR"}</span>
       </div>
       <p class="ds-note" data-f="errMsg" role="alert" style="margin: 1rem;"></p>`;
     host.appendChild(root);

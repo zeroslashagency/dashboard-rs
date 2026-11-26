@@ -163,7 +163,7 @@ function buildChrome(root, tab) {
     </div>
     <div class="ds-head-tools">
       <span class="ds-conf" data-f="conf" title="Data completeness from the gapless sequence audit">
-        <span class="ds-conf-dot"></span><span data-f="confLabel">—</span>
+        <span class="sp-pill-lbl" data-f="confLabel">—</span>
       </span>
       ${tab.window ? `<div class="ds-window" data-f="window"></div>` : ""}
     </div>`;
@@ -192,14 +192,24 @@ async function paintConfidence(chrome) {
   try {
     const audit = await dataLayer.gapAudit();
     const c = dataLayer.confidenceFromAudit(audit);
-    chrome.conf.className = `ds-conf conf-${c.level}`;
-    chrome.confLabel.textContent = c.label;
+    if (window.VMCStatusPill) {
+      window.VMCStatusPill.updatePill(chrome.conf, c.level, c.label, `ds-conf conf-${c.level}`);
+    } else {
+      chrome.conf.className = `ds-conf conf-${c.level}`;
+      if (chrome.confLabel) chrome.confLabel.textContent = c.label;
+    }
     chrome.conf.title = `Data completeness — ${c.detail || c.label}`;
   } catch (err) {
     // Distinguish timeout from genuine unreachable
     const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('aborted'));
-    chrome.conf.className = "ds-conf conf-warn";
-    chrome.confLabel.textContent = isTimeout ? "SLOW" : "OFFLINE";
+    const lbl = isTimeout ? "SLOW" : "OFFLINE";
+    const kind = isTimeout ? "warn" : "offline";
+    if (window.VMCStatusPill) {
+      window.VMCStatusPill.updatePill(chrome.conf, kind, lbl, "ds-conf conf-warn");
+    } else {
+      chrome.conf.className = "ds-conf conf-warn";
+      if (chrome.confLabel) chrome.confLabel.textContent = lbl;
+    }
     chrome.conf.title = isTimeout 
       ? "Gap audit request timed out — collector is slow but reachable"
       : "Collector unreachable";

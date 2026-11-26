@@ -161,9 +161,11 @@ html[data-tv][data-tv-compact] .machine-card-eyebrow { min-height: 0; padding: 1
 html[data-tv][data-tv-compact] .machine-card-mode { font-size: clamp(0.7rem, 4cqi, 1.3rem); }
 html[data-tv][data-tv-compact] .status-pill {
   min-width: 0;
-  padding: 3px 9px;
-  font-size: clamp(0.6rem, 3.2cqi, 1rem);
-  border-radius: 10px;
+  padding: 2.5px 8px 2.5px 6px;
+  gap: 4px;
+  font-size: clamp(0.58rem, 3.1cqi, 0.96rem);
+  border-width: 1.25px;
+  border-radius: 999px;
 }
 html[data-tv][data-tv-compact] .machine-card-inner { margin: 2px; gap: 4px; }
 html[data-tv][data-tv-compact] .card-panel { padding: clamp(5px, 2cqi, 12px); border-radius: 16px; }

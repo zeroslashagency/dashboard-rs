@@ -1,0 +1,956 @@
+/* ===== Interactive Wallet Affordances & Pulled-Out Slot State ===== */
+.pw-card:not(.pw-card--empty) {
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.pw-card:not(.pw-card--empty):focus-visible {
+  transform: translateY(-7px);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    0 0 0 2px #cdf67e,
+    0 -5px 14px rgba(0, 0, 0, 0.36);
+}
+.pw-card:not(.pw-card--empty):active {
+  transform: translateY(-3px) scale(0.992);
+}
+
+/* While a peeking card is pulled out into the center stage, leave a crisp recessed gap */
+.pw-card.pw-card--pulled {
+  opacity: 0.24 !important;
+  transform: translateY(-6px) scale(0.97) !important;
+  filter: saturate(0.35) brightness(0.65);
+  pointer-events: none;
+}
+
+.pw-pocket.pw-pocket--interactive {
+  cursor: pointer;
+  outline: none;
+  transition: filter 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (hover: hover) {
+  .pw-pocket.pw-pocket--interactive:hover {
+    filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.44)) brightness(1.06);
+  }
+}
+.pw-pocket.pw-pocket--interactive:focus-visible {
+  box-shadow: 0 0 0 2px #cdf67e;
+}
+.pw-pocket.pw-pocket--pulled {
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.28)) brightness(0.76);
+}
+
+/* ===== Step 2: In-Place Slide-Up Quick Preview Card Inside Wallet ===== */
+.pw-stack-wrap {
+  position: relative;
+  z-index: 2;
+}
+
+.pw-wallet.pw-wallet--peeking .pw-stack .pw-card {
+  opacity: 0.28;
+  transform: scale(0.972);
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pw-wallet.pw-wallet--peeking .pw-stack .pw-card.pw-card--peek-src {
+  opacity: 0.14;
+}
+@media (hover: hover) {
+  .pw-wallet.pw-wallet--peeking .pw-stack .pw-card:not(.pw-card--empty):hover {
+    opacity: 0.72;
+    transform: translateY(-5px) scale(0.99);
+  }
+}
+
+.pw-peek-stage {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.pw-peek-card {
+  --pk-bg: linear-gradient(180deg, #ebffa8 0%, #cff773 52%, #b7eb52 100%);
+  --pk-ink: #132206;
+  --pk-muted: rgba(19, 34, 6, 0.70);
+  --pk-rule: rgba(19, 34, 6, 0.15);
+
+  position: relative;
+  width: 100%;
+  border-radius: 16px 16px 6px 6px;
+  padding: 13px 15px 32px;
+  background: var(--pk-bg);
+  color: var(--pk-ink);
+  font-family: var(--font-body);
+  pointer-events: auto;
+  cursor: pointer;
+  outline: none;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.84),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+    0 -8px 24px rgba(0, 0, 0, 0.38),
+    0 6px 16px rgba(0, 0, 0, 0.28);
+  transform: translate3d(0, 26px, 0) scale(0.96);
+  opacity: 0;
+  transition:
+    transform 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.18s ease,
+    box-shadow 0.2s ease;
+  will-change: transform, opacity;
+}
+.pw-peek-card.is-open {
+  transform: translate3d(0, 0, 0) scale(1);
+  opacity: 1;
+}
+@media (hover: hover) {
+  .pw-peek-card.is-open:hover {
+    transform: translate3d(0, -3px, 0) scale(1.006);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+      0 -12px 28px rgba(0, 0, 0, 0.44),
+      0 8px 18px rgba(0, 0, 0, 0.3);
+  }
+}
+.pw-peek-card:focus-visible {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    0 0 0 2.5px #cdf67e,
+    0 -10px 24px rgba(0, 0, 0, 0.42);
+}
+
+.pw-peek-card[data-slot="0"] {
+  --pk-bg: linear-gradient(180deg, #dde0ff 0%, #bcc3ff 52%, #a6affd 100%);
+  --pk-ink: #15183a;
+  --pk-muted: rgba(21, 24, 58, 0.72);
+  --pk-rule: rgba(21, 24, 58, 0.15);
+}
+.pw-peek-card[data-slot="1"] {
+  --pk-bg: linear-gradient(180deg, #d7f3fe 0%, #a9e2f8 52%, #8ed5f3 100%);
+  --pk-ink: #082232;
+  --pk-muted: rgba(8, 34, 50, 0.72);
+  --pk-rule: rgba(8, 34, 50, 0.15);
+}
+.pw-peek-card[data-slot="2"] {
+  --pk-bg: linear-gradient(180deg, #ebffa8 0%, #cff773 52%, #b7eb52 100%);
+  --pk-ink: #132206;
+  --pk-muted: rgba(19, 34, 6, 0.70);
+  --pk-rule: rgba(19, 34, 6, 0.15);
+}
+.pw-peek-card[data-slot="3"] {
+  --pk-bg: linear-gradient(180deg, #ffffff 0%, #f1f4f9 55%, #e3e8f0 100%);
+  --pk-ink: #111827;
+  --pk-muted: rgba(17, 24, 39, 0.68);
+  --pk-rule: rgba(17, 24, 39, 0.13);
+}
+
+.pw-peek-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--pk-rule);
+}
+.pw-peek-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: clamp(0.95rem, 1.05vw, 1.14rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pw-peek-parts {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: clamp(0.88rem, 0.96vw, 1.06rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.08;
+}
+
+.pw-peek-mid {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.pw-peek-span {
+  font-family: var(--font-display);
+  font-size: clamp(0.8rem, 0.86vw, 0.94rem);
+  font-weight: 700;
+  color: var(--pk-ink);
+  white-space: nowrap;
+}
+.pw-peek-dur {
+  font-family: var(--font-display);
+  font-size: clamp(0.76rem, 0.82vw, 0.9rem);
+  font-weight: 600;
+  color: var(--pk-muted);
+  white-space: nowrap;
+}
+
+.pw-peek-cue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--pk-muted);
+  line-height: 1.1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-wallet.pw-wallet--peeking .pw-stack .pw-card,
+  .pw-peek-card {
+    transition: none !important;
+  }
+}
+
+/* ===== Style 1 — Pastel Card Unfold Rising Out of Stitched Forest Leather Pocket ===== */
+.nc-folio-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(8, 12, 17, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-theme="light"] .nc-folio-backdrop {
+  background: rgba(15, 23, 42, 0.46);
+}
+.nc-folio-backdrop.is-open {
+  opacity: 1;
+}
+.nc-folio-backdrop[hidden] {
+  display: none !important;
+}
+
+.nc-folio-host {
+  position: fixed;
+  inset: 0;
+  z-index: 1210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 14px;
+  pointer-events: none;
+}
+.nc-folio-host[hidden] {
+  display: none !important;
+}
+
+/* Outer stage holding the rising pastel card + stitched forest leather pocket base */
+.nc-folio {
+  --nc-card-bg: linear-gradient(180deg, #eeffab 0%, #d4f878 42%, #c4f266 100%);
+  --nc-ink: #121c07;
+  --nc-ink-muted: rgba(18, 28, 7, 0.68);
+  --nc-rule: rgba(18, 28, 7, 0.16);
+  --nc-bar-main: #2eb86d;
+  --nc-bar-fast: #169c56;
+  --nc-bar-slow: #d97706;
+  --nc-stop: #f9705e;
+  --nc-accent: #c4f266;
+
+  position: relative;
+  width: min(610px, calc(100vw - 24px));
+  max-height: calc(100vh - 36px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  transform-origin: center center;
+  will-change: transform, opacity;
+  isolation: isolate;
+}
+
+/* Slot-matched tactile pastel palettes */
+.nc-folio[data-slot="0"] {
+  --nc-card-bg: linear-gradient(180deg, #e1e4ff 0%, #c6ccff 46%, #b5bdff 100%);
+  --nc-ink: #141838;
+  --nc-ink-muted: rgba(20, 24, 56, 0.68);
+  --nc-rule: rgba(20, 24, 56, 0.15);
+  --nc-bar-main: #3b5bdb;
+  --nc-bar-fast: #2b44b8;
+  --nc-accent: #bcc3ff;
+}
+.nc-folio[data-slot="1"] {
+  --nc-card-bg: linear-gradient(180deg, #dbf4fe 0%, #b3e6fa 46%, #99dcf7 100%);
+  --nc-ink: #082231;
+  --nc-ink-muted: rgba(8, 34, 49, 0.68);
+  --nc-rule: rgba(8, 34, 49, 0.15);
+  --nc-bar-main: #0e88b5;
+  --nc-bar-fast: #096a91;
+  --nc-accent: #a7e1f7;
+}
+.nc-folio[data-slot="2"] {
+  --nc-card-bg: linear-gradient(180deg, #eeffab 0%, #d4f878 42%, #c4f266 100%);
+  --nc-ink: #121c07;
+  --nc-ink-muted: rgba(18, 28, 7, 0.68);
+  --nc-rule: rgba(18, 28, 7, 0.16);
+  --nc-bar-main: #2eb86d;
+  --nc-bar-fast: #169c56;
+  --nc-accent: #cdf67e;
+}
+.nc-folio[data-slot="3"] {
+  --nc-card-bg: linear-gradient(180deg, #ffffff 0%, #f1f4f8 48%, #e4e9f1 100%);
+  --nc-ink: #111827;
+  --nc-ink-muted: rgba(17, 24, 39, 0.66);
+  --nc-rule: rgba(17, 24, 39, 0.13);
+  --nc-bar-main: #16a34a;
+  --nc-bar-fast: #15803d;
+  --nc-accent: #edf1f7;
+}
+.nc-folio[data-slot="live"] {
+  --nc-card-bg: linear-gradient(180deg, #e8ff9c 0%, #cdf768 44%, #b9ef52 100%);
+  --nc-ink: #0f1f05;
+  --nc-ink-muted: rgba(15, 31, 5, 0.70);
+  --nc-rule: rgba(15, 31, 5, 0.16);
+  --nc-bar-main: #1ea85d;
+  --nc-bar-fast: #128546;
+  --nc-accent: #b9ef52;
+}
+
+/* Dark forest leather back-sleeve ears rising behind the lower edges of the pastel card */
+.nc-folio-back-ears {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  height: 158px;
+  border-radius: 20px 20px 26px 26px;
+  background: linear-gradient(180deg, #213a1c 0%, #162913 100%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(168, 224, 134, 0.22),
+    inset 0 0 0 1px rgba(132, 186, 104, 0.16),
+    0 22px 54px rgba(0, 0, 0, 0.56);
+  z-index: 0;
+  pointer-events: none;
+}
+.nc-folio-back-ears::before {
+  content: "";
+  position: absolute;
+  inset: 7px 7px 14px;
+  border-radius: 14px 14px 20px 20px;
+  border: 1.5px dashed rgba(132, 186, 110, 0.30);
+}
+
+/* ===== The Unfolded Pastel NC Summary Card ===== */
+.nc-folio-card {
+  position: relative;
+  z-index: 2;
+  width: calc(100% - 44px);
+  max-height: calc(100vh - 148px);
+  overflow-y: auto;
+  border-radius: 20px 20px 14px 14px;
+  padding: 20px 24px 36px;
+  background: var(--nc-card-bg);
+  color: var(--nc-ink);
+  font-family: var(--font-body);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.82),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 14px 34px rgba(0, 0, 0, 0.38);
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease, background 0.22s ease;
+  will-change: transform, opacity;
+}
+
+/* Tactile card-slides-down-into-pocket motion when swapping slots or opening */
+.nc-folio.is-tucked .nc-folio-card {
+  transform: translate3d(0, 44px, 0) scale(0.985);
+  opacity: 0.72;
+}
+.nc-folio.is-swapping .nc-folio-card {
+  transform: translate3d(0, 38px, 0) scale(0.98);
+  opacity: 0.28;
+  transition-duration: 0.16s;
+}
+
+/* Row 1: Header (NC Program ID on left, Machine · Shift + Close on right) */
+.nc-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--nc-rule);
+}
+.nc-card-prog {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1.22rem, 2.3vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  color: var(--nc-ink);
+}
+.nc-card-prog-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nc-folio-live-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #15803d;
+  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.22);
+  animation: nc-live-pulse 1.5s ease-in-out infinite;
+}
+.nc-folio-live-dot[hidden] {
+  display: none !important;
+}
+@keyframes nc-live-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.22); opacity: 0.65; }
+}
+
+.nc-card-head-right {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.nc-card-sub {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--nc-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 230px;
+}
+.nc-folio-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 0;
+  background: transparent;
+  color: var(--nc-ink-muted);
+  font-size: 1.05rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.nc-folio-close:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--nc-ink);
+  transform: scale(1.06);
+}
+.nc-folio-close:focus-visible {
+  outline: 2px solid var(--nc-ink);
+  outline-offset: 2px;
+}
+
+/* Row 2: Start -> End | Total Duration */
+.nc-folio-times {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 0.92fr);
+  align-items: center;
+  gap: 10px;
+  padding: 15px 0 16px;
+  border-bottom: 1px solid var(--nc-rule);
+}
+.nc-time-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nc-time-cell--dur {
+  padding-left: 16px;
+  border-left: 1px solid var(--nc-rule);
+}
+.nc-lbl {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--nc-ink-muted);
+  line-height: 1.15;
+}
+.nc-time-val {
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2.5vw, 1.56rem);
+  font-weight: 700;
+  color: var(--nc-ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+.nc-time-val--live {
+  color: #146c38;
+}
+.nc-time-date {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--nc-ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nc-time-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--nc-ink-muted);
+  margin-top: 14px;
+}
+.nc-time-arrow svg {
+  width: 22px;
+  height: 14px;
+  display: block;
+}
+
+/* Row 3: 4-Column Metric Strip (Parts | Avg Cycle | Run vs Stopped | Alarms) */
+.nc-folio-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 0.98fr) minmax(0, 1.52fr) minmax(0, 0.68fr);
+  align-items: stretch;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--nc-rule);
+}
+.nc-met {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 12px;
+}
+.nc-met:first-child {
+  padding-left: 0;
+}
+.nc-met:last-child {
+  padding-right: 0;
+  align-items: center;
+  text-align: center;
+}
+.nc-met + .nc-met {
+  border-left: 1px solid var(--nc-rule);
+}
+.nc-met-val {
+  font-family: var(--font-display);
+  font-size: clamp(1.32rem, 2.6vw, 1.66rem);
+  font-weight: 700;
+  color: var(--nc-ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.02;
+  white-space: nowrap;
+}
+.nc-met-val.has-alarm {
+  color: #b91c1c;
+}
+.nc-met-lbl {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--nc-ink-muted);
+  line-height: 1.2;
+}
+.nc-met-sub {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--nc-ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Run vs Stopped crisp rounded bar inside Col 3 */
+.nc-up-track {
+  position: relative;
+  height: 22px;
+  margin-top: 3px;
+  border-radius: 6px;
+  background: rgba(18, 28, 7, 0.12);
+  display: flex;
+  overflow: hidden;
+  gap: 2px;
+}
+.nc-up-run {
+  height: 100%;
+  border-radius: 5px 2px 2px 5px;
+  background: linear-gradient(180deg, #36c978 0%, #24a860 100%);
+  transition: width 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  min-width: 0;
+}
+.nc-up-run[data-full="1"] {
+  border-radius: 5px;
+}
+.nc-up-stop {
+  height: 100%;
+  border-radius: 2px 5px 5px 2px;
+  background: linear-gradient(180deg, #fb7c6a 0%, #e95b49 100%);
+  transition: width 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  min-width: 0;
+}
+.nc-up-stop[data-full="1"] {
+  border-radius: 5px;
+}
+.nc-up-caption {
+  margin-top: 3px;
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--nc-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inline alarm details strip (only rendered if alarms/e-stops occurred) */
+.nc-alarm-list {
+  padding: 9px 0 10px;
+  border-bottom: 1px solid var(--nc-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #991b1b;
+}
+.nc-alarm-list[hidden] {
+  display: none !important;
+}
+.nc-alarm-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.nc-alarm-code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nc-alarm-ts {
+  flex: 0 0 auto;
+  opacity: 0.76;
+}
+
+/* Live Active Cycle Progress Strip (shown only when inspecting active LIVE pocket) */
+.nc-folio-live {
+  padding: 12px 0 13px;
+  border-bottom: 1px solid var(--nc-rule);
+}
+.nc-folio-live[hidden] {
+  display: none !important;
+}
+.nc-live-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.nc-live-pct {
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--nc-ink);
+  font-variant-numeric: tabular-nums;
+}
+.nc-live-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--nc-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Row 4: Mini Bar Timeline (exact Style 1 crisp rounded emerald bars + # part ticks) */
+.nc-folio-cycles {
+  padding-top: 14px;
+}
+.nc-cyc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.nc-cyc-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--nc-ink);
+}
+.nc-cyc-readout {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--nc-ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+.nc-cyc-capsule {
+  position: relative;
+  height: 46px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+}
+.nc-cyc-bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  max-width: 14px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+}
+.nc-cyc-bar-fill {
+  width: 100%;
+  min-height: 7px;
+  border-radius: 3px;
+  background: var(--nc-bar-main);
+  transition: transform 0.14s ease, filter 0.14s ease, background 0.14s ease;
+}
+.nc-cyc-bar.is-slow .nc-cyc-bar-fill {
+  background: var(--nc-bar-slow);
+}
+.nc-cyc-bar.is-fast .nc-cyc-bar-fill {
+  background: var(--nc-bar-fast);
+}
+.nc-cyc-bar:hover .nc-cyc-bar-fill,
+.nc-cyc-bar:focus-visible .nc-cyc-bar-fill,
+.nc-cyc-bar.is-active .nc-cyc-bar-fill {
+  transform: scaleY(1.1);
+  filter: brightness(0.86);
+}
+
+.nc-cyc-ticks {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--nc-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.nc-cyc-ticks[hidden] {
+  display: none !important;
+}
+
+.nc-cyc-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 0.79rem;
+  font-weight: 500;
+  color: var(--nc-ink-muted);
+  text-align: center;
+}
+.nc-retry-btn {
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--nc-rule);
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--nc-ink);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nc-retry-btn:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+/* Shimmer loading bars (zero layout shift) */
+.nc-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: rgba(18, 28, 7, 0.16) !important;
+}
+.nc-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: nc-shimmer-slide 1.2s ease-in-out infinite;
+}
+@keyframes nc-shimmer-slide {
+  100% { transform: translateX(100%); }
+}
+
+/* ===== Stitched Forest-Green Leather Pocket Base (exact Style 1 foreground pocket) ===== */
+.nc-folio-sleeve {
+  position: relative;
+  z-index: 4;
+  width: 100%;
+  margin-top: -28px;
+  padding: 36px 22px 16px;
+  border-radius: 16px 16px 28px 28px;
+  filter: drop-shadow(0 16px 32px rgba(0, 0, 0, 0.52));
+}
+.nc-sleeve-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  z-index: 0;
+}
+.nc-sleeve-stitch {
+  stroke: rgba(132, 192, 98, 0.52);
+  stroke-width: 1.35;
+  stroke-dasharray: 5 3.6;
+  stroke-linecap: round;
+}
+.nc-sleeve-rim {
+  stroke: rgba(186, 240, 146, 0.28);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+/* Compact Wallet Slot Switcher tucked cleanly inside the stitched forest leather pocket */
+.nc-folio-slots {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nc-folio-slots::-webkit-scrollbar {
+  display: none;
+}
+.nc-slot-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 120px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(176, 224, 138, 0.16);
+  background: rgba(10, 20, 10, 0.46);
+  color: rgba(226, 240, 218, 0.78);
+  font-family: var(--font-display);
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+.nc-slot-swatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.nc-slot-btn[data-slot="0"] .nc-slot-swatch { background: #bcc3ff; }
+.nc-slot-btn[data-slot="1"] .nc-slot-swatch { background: #a7e1f7; }
+.nc-slot-btn[data-slot="2"] .nc-slot-swatch { background: #cdf67e; }
+.nc-slot-btn[data-slot="3"] .nc-slot-swatch { background: #f1f4f9; }
+.nc-slot-btn[data-slot="live"] .nc-slot-swatch { background: #9bf23a; box-shadow: 0 0 6px #9bf23a; }
+
+.nc-slot-btn:hover {
+  background: rgba(18, 34, 16, 0.82);
+  color: #ffffff;
+}
+.nc-slot-btn.is-current {
+  background: rgba(196, 248, 108, 0.18);
+  border-color: var(--nc-accent);
+  color: #ffffff;
+}
+.nc-slot-btn:focus-visible {
+  outline: 2px solid var(--nc-accent);
+  outline-offset: 1px;
+}
+
+@media (max-width: 560px) {
+  .nc-folio-card {
+    width: calc(100% - 20px);
+    padding: 16px 16px 32px;
+  }
+  .nc-card-head {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+  .nc-folio-times {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    row-gap: 10px;
+  }
+  .nc-time-cell--dur {
+    grid-column: 1 / -1;
+    padding-left: 0;
+    padding-top: 8px;
+    border-left: 0;
+    border-top: 1px solid var(--nc-rule);
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .nc-folio-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+  .nc-met:nth-child(3) {
+    border-left: 0;
+    padding-left: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--nc-rule);
+  }
+  .nc-met:nth-child(4) {
+    padding-top: 10px;
+    border-top: 1px solid var(--nc-rule);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nc-folio-backdrop,
+  .nc-folio,
+  .nc-folio-card,
+  .nc-up-run,
+  .nc-up-stop,
+  .nc-cyc-bar-fill,
+  .nc-slot-btn {
+    transition: none !important;
+  }
+  .nc-folio-live-dot,
+  .nc-shimmer::after {
+    animation: none !important;
+  }
+}

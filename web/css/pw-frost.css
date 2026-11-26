@@ -1,0 +1,428 @@
+/* ==========================================================================
+   Style 1 — Creeping Glacial Frost for .pw-pocket
+   Mid-cycle pause: creeping jagged crystalline frost from bottom, frozen bar,
+                    crisp % + PAUSED · MMm SSs timer above the ice line.
+   Full stop:       full pocket glacial ice encasement conforming to the
+                    curved thumb-notch contour with STOPPED / OFFLINE + timer.
+   Strictly scoped to .pw-pocket; peeking NC cards (.pw-stack) stay unfrozen.
+   ========================================================================== */
+
+/* Legacy flat amber curtain inside .pw-pocket is replaced by .pw-frost,
+ * while entry.root[data-idle-alert="1"] card-border alert remains intact. */
+.pw-pocket > .machine-card-idle-time {
+  display: none !important;
+}
+
+/* Smooth glacial drop-shadow shift when paused or frozen */
+.pw-pocket {
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.55s ease;
+}
+.pw-pocket[data-freeze="pause"] {
+  filter:
+    drop-shadow(0 8px 18px rgba(0, 0, 0, 0.38))
+    drop-shadow(0 3px 12px rgba(125, 211, 252, 0.22));
+}
+.pw-pocket[data-freeze="stop"] {
+  filter:
+    drop-shadow(0 10px 22px rgba(4, 18, 32, 0.44))
+    drop-shadow(0 0 18px rgba(186, 230, 253, 0.26));
+}
+[data-theme="light"] .pw-pocket[data-freeze="stop"] {
+  filter:
+    drop-shadow(0 10px 20px rgba(15, 39, 64, 0.24))
+    drop-shadow(0 0 16px rgba(125, 211, 252, 0.30));
+}
+
+/* Keep .pw-pocket-body above the rising ice bed (.pw-frost-back, z:1)
+ * and below the translucent foreground frost & full-stop cover (.pw-frost-front, z:4). */
+.pw-pocket-body {
+  z-index: 2;
+  transition:
+    opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.45s ease;
+}
+.pw-pocket[data-freeze="stop"] .pw-pocket-body {
+  opacity: 0.11;
+  filter: blur(1.4px);
+}
+
+/* ---------- Mid-Cycle Pause Readout Line (above the ice line) ---------- */
+.pw-frost-pause-line {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: clamp(0.88rem, 0.96vw, 1.08rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: #e0f2fe;
+  text-shadow:
+    0 1px 8px rgba(4, 18, 32, 0.72),
+    0 0 12px rgba(125, 211, 252, 0.38);
+  white-space: nowrap;
+}
+.pw-frost-pause-ico {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: #bae6fd;
+  filter: drop-shadow(0 0 5px rgba(186, 230, 253, 0.65));
+}
+.pw-frost-pause-sep {
+  opacity: 0.65;
+}
+.pw-frost-pause-clock {
+  color: #ffffff;
+  letter-spacing: 0.04em;
+}
+
+/* Swap normal subtitle for crisp PAUSED · MMm SSs during mid-cycle pause */
+.pw-pocket[data-freeze="pause"] .pw-sub {
+  display: none;
+}
+.pw-pocket[data-freeze="pause"] .pw-frost-pause-line {
+  display: inline-flex;
+}
+
+/* Keep paused % snow-white & frosty above the creeping ridge */
+.pw-pocket[data-freeze="pause"] .pw-pct {
+  color: #f8fdff;
+  text-shadow:
+    0 2px 12px rgba(3, 18, 32, 0.62),
+    0 0 16px rgba(186, 230, 253, 0.28);
+}
+
+/* ---------- Frozen Crystalline Progress Bar (Mid-Cycle Pause) ---------- */
+.pw-pocket[data-freeze="pause"] .cycle-panel-bar.pw-bar {
+  background: linear-gradient(180deg, rgba(10, 24, 38, 0.84) 0%, rgba(16, 36, 54, 0.78) 100%);
+  box-shadow:
+    inset 0 2px 6px rgba(4, 14, 26, 0.72),
+    inset 0 0 0 1px rgba(224, 242, 254, 0.42),
+    0 0 12px rgba(186, 230, 253, 0.32),
+    0 1px 0 rgba(255, 255, 255, 0.32);
+}
+.pw-pocket[data-freeze="pause"] .pw-bar-fill {
+  background: linear-gradient(
+    90deg,
+    #6ee7b7 0%,
+    #99f6e4 32%,
+    #bae6fd 68%,
+    #f0f9ff 100%
+  );
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.92),
+    inset 0 -2px 4px rgba(14, 116, 144, 0.42),
+    0 0 14px rgba(186, 230, 253, 0.65);
+}
+.pw-pocket[data-freeze="pause"] .pw-bar-flare {
+  opacity: 0 !important;
+}
+.pw-pocket[data-freeze="pause"] .pw-bar-dot {
+  background: radial-gradient(circle, #ffffff 0%, #bae6fd 60%, #38bdf8 100%);
+  box-shadow:
+    0 0 6px 1px rgba(186, 230, 253, 0.75),
+    0 0 12px 2px rgba(56, 189, 248, 0.35);
+}
+.pw-pocket[data-freeze="pause"] .cycle-panel-meta.pw-meta {
+  color: rgba(240, 249, 255, 0.94);
+  text-shadow:
+    0 1px 5px rgba(5, 20, 34, 0.82),
+    0 0 10px rgba(8, 28, 46, 0.65);
+}
+
+/* ---------- Shared Frost Clipping Planes (conform to pocket thumb-notch) ---------- */
+.pw-frost-back,
+.pw-frost-front {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: 14px 14px 24px 24px;
+}
+.pw-frost-back {
+  z-index: 1;
+}
+.pw-frost-front {
+  z-index: 4;
+}
+
+/* ---------- Layer 1 (Back): Rising Jagged Glacial Ice Bed ---------- */
+.pw-frost-bed {
+  position: absolute;
+  inset: 0;
+  transform: translate3d(0, 114%, 0);
+  opacity: 0;
+  will-change: transform, opacity;
+  transition:
+    transform 0.46s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.36s ease;
+}
+.pw-pocket[data-freeze="pause"] .pw-frost-bed {
+  transform: translate3d(0, 28%, 0);
+  opacity: 1;
+  transition:
+    transform 0.78s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.48s ease;
+}
+.pw-pocket[data-freeze="stop"] .pw-frost-bed {
+  transform: translate3d(0, 0%, 0);
+  opacity: 1;
+  transition:
+    transform 0.86s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.48s ease;
+}
+
+.pw-frost-ridge-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transition: opacity 0.48s ease;
+}
+/* When fully frozen, the jagged ridge smoothly merges into the full-pocket ice encasement */
+.pw-pocket[data-freeze="stop"] .pw-frost-ridge-svg {
+  opacity: 0.22;
+}
+
+/* ---------- Layer 2 (Front): Translucent Forefront Icicles + Full-Stop Ice Encasement ---------- */
+.pw-frost-rim-icicles {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: translate3d(0, 114%, 0);
+  opacity: 0;
+  will-change: transform, opacity;
+  transition:
+    transform 0.46s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.32s ease;
+}
+.pw-pocket[data-freeze="pause"] .pw-frost-rim-icicles {
+  transform: translate3d(0, 28%, 0);
+  opacity: 0.92;
+  transition:
+    transform 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.52s ease;
+}
+.pw-pocket[data-freeze="stop"] .pw-frost-rim-icicles {
+  transform: translate3d(0, 0%, 0);
+  opacity: 0;
+  transition:
+    transform 0.65s ease,
+    opacity 0.35s ease;
+}
+
+/* Full-stop translucent crystalline glass encasement */
+.pw-frost-encase {
+  position: absolute;
+  inset: 0;
+  transform: translate3d(0, 108%, 0);
+  opacity: 0;
+  will-change: transform, opacity;
+  background:
+    radial-gradient(ellipse 92% 64% at 18% 18%, rgba(240, 249, 255, 0.46) 0%, rgba(186, 230, 253, 0.16) 44%, transparent 72%),
+    radial-gradient(ellipse 84% 70% at 86% 84%, rgba(224, 242, 254, 0.50) 0%, rgba(147, 197, 253, 0.18) 46%, transparent 74%),
+    radial-gradient(ellipse 68% 58% at 50% 50%, rgba(19, 44, 52, 0.24) 0%, rgba(12, 34, 48, 0.34) 100%),
+    linear-gradient(
+      155deg,
+      rgba(224, 242, 254, 0.42) 0%,
+      rgba(148, 197, 224, 0.26) 42%,
+      rgba(186, 230, 253, 0.34) 76%,
+      rgba(240, 249, 255, 0.52) 100%
+    );
+  -webkit-backdrop-filter: blur(7px) saturate(1.18) brightness(1.06);
+  backdrop-filter: blur(7px) saturate(1.18) brightness(1.06);
+  transition:
+    transform 0.46s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.34s ease;
+}
+.pw-pocket[data-freeze="stop"] .pw-frost-encase {
+  transform: translate3d(0, 0%, 0);
+  opacity: 1;
+  transition:
+    transform 0.84s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.55s ease;
+}
+
+/* Subtle diagonal glacial sheen sweep inside full-stop encasement */
+.pw-frost-encase::after {
+  content: "";
+  position: absolute;
+  inset: -40% -60%;
+  background: linear-gradient(
+    118deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.18) 49%,
+    rgba(224, 242, 254, 0.26) 51%,
+    transparent 62%
+  );
+  transform: translate3d(-38%, 0, 0);
+  opacity: 0;
+  pointer-events: none;
+}
+.pw-pocket[data-freeze="stop"] .pw-frost-encase::after {
+  opacity: 1;
+  animation: pw-frost-sheen 7.5s ease-in-out infinite;
+}
+
+@keyframes pw-frost-sheen {
+  0%, 16%   { transform: translate3d(-44%, 0, 0); }
+  52%, 100% { transform: translate3d(44%, 0, 0); }
+}
+
+.pw-frost-encase-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ---------- Layer 3: Lightweight Drifting Snowflakes ---------- */
+.pw-frost-snow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.pw-pocket[data-freeze="pause"] .pw-frost-snow,
+.pw-pocket[data-freeze="stop"] .pw-frost-snow {
+  opacity: 1;
+}
+
+.pw-frost-flake {
+  position: absolute;
+  top: -12px;
+  left: var(--fx, 50%);
+  width: var(--fs, 8px);
+  height: var(--fs, 8px);
+  color: rgba(240, 249, 255, 0.88);
+  filter: drop-shadow(0 0 3px rgba(186, 230, 253, 0.72));
+  opacity: 0;
+  animation: pw-flake-drift var(--fd, 6.8s) linear var(--fdelay, 0s) infinite;
+  animation-play-state: paused;
+}
+.pw-pocket[data-freeze="pause"] .pw-frost-flake,
+.pw-pocket[data-freeze="stop"] .pw-frost-flake {
+  animation-play-state: running;
+}
+/* On mid-cycle pause, gently restrict flakes toward lower icy zone */
+.pw-pocket[data-freeze="pause"] .pw-frost-snow {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 16%, rgba(0, 0, 0, 0.65) 48%, #000 72%);
+  mask-image: linear-gradient(to bottom, transparent 16%, rgba(0, 0, 0, 0.65) 48%, #000 72%);
+}
+.pw-pocket[data-freeze="stop"] .pw-frost-snow {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.pw-frost-flake:nth-child(1) { --fx: 11%; --fs: 9px;  --fd: 6.4s; --fdelay: -1.1s; --fdrift: 8px; }
+.pw-frost-flake:nth-child(2) { --fx: 26%; --fs: 7px;  --fd: 7.9s; --fdelay: -4.2s; --fdrift: -6px; }
+.pw-frost-flake:nth-child(3) { --fx: 42%; --fs: 6px;  --fd: 5.8s; --fdelay: -2.4s; --fdrift: 5px; }
+.pw-frost-flake:nth-child(4) { --fx: 59%; --fs: 8px;  --fd: 8.4s; --fdelay: -5.6s; --fdrift: -9px; }
+.pw-frost-flake:nth-child(5) { --fx: 74%; --fs: 10px; --fd: 7.1s; --fdelay: -0.7s; --fdrift: 7px; }
+.pw-frost-flake:nth-child(6) { --fx: 88%; --fs: 7px;  --fd: 6.2s; --fdelay: -3.5s; --fdrift: -5px; }
+.pw-frost-flake:nth-child(7) { --fx: 19%; --fs: 6px;  --fd: 9.0s; --fdelay: -6.1s; --fdrift: 6px; }
+
+@keyframes pw-flake-drift {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.85;
+  }
+  84% {
+    opacity: 0.72;
+  }
+  100% {
+    transform: translate3d(var(--fdrift, 6px), 192px, 0) rotate(140deg);
+    opacity: 0;
+  }
+}
+
+/* ---------- Layer 4: Full-Stop Centered Readout (STOPPED / OFFLINE + Timer) ---------- */
+.pw-frost-stop-readout {
+  position: absolute;
+  inset: 22px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  text-align: center;
+  opacity: 0;
+  transform: translate3d(0, 10px, 0) scale(0.96);
+  will-change: transform, opacity;
+  transition:
+    opacity 0.34s ease,
+    transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pw-pocket[data-freeze="stop"] .pw-frost-stop-readout {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    opacity 0.48s ease 0.16s,
+    transform 0.54s cubic-bezier(0.22, 1, 0.36, 1) 0.12s;
+}
+
+.pw-frost-stop-label {
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 2.1vw, 2.45rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow:
+    0 2px 14px rgba(3, 16, 28, 0.82),
+    0 1px 3px rgba(3, 16, 28, 0.92),
+    0 0 18px rgba(186, 230, 253, 0.42);
+}
+
+.pw-frost-stop-clock {
+  font-family: var(--font-display);
+  font-size: clamp(1.18rem, 1.4vw, 1.56rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  color: #e0f2fe;
+  text-shadow:
+    0 2px 10px rgba(3, 16, 28, 0.86),
+    0 1px 2px rgba(3, 16, 28, 0.95);
+}
+
+/* ---------- Reduced Motion Compliance ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .pw-pocket,
+  .pw-pocket-body,
+  .pw-frost-bed,
+  .pw-frost-ridge-svg,
+  .pw-frost-rim-icicles,
+  .pw-frost-encase,
+  .pw-frost-snow,
+  .pw-frost-stop-readout {
+    transition: none !important;
+  }
+  .pw-pocket[data-freeze="stop"] .pw-frost-encase::after,
+  .pw-frost-flake {
+    animation: none !important;
+  }
+  .pw-pocket[data-freeze="pause"] .pw-frost-flake,
+  .pw-pocket[data-freeze="stop"] .pw-frost-flake {
+    opacity: 0.55;
+    top: 64%;
+  }
+  .pw-frost-flake:nth-child(2n) { top: 44%; }
+  .pw-frost-flake:nth-child(3n) { top: 78%; }
+}

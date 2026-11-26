@@ -352,6 +352,20 @@ function fmtIdleDuration(sec) {
   return `${m}m`;
 }
 
+/* Frost overlay live timer: MMm SSs under 1h (e.g. "03m 42s", "18m 14s"),
+ * Hh MMm under 1d, Dd HHh above 1d. */
+function fmtFrostDuration(sec) {
+  if (sec === null || sec === undefined || Number.isNaN(Number(sec))) return "00m 00s";
+  const total = Math.max(0, Math.floor(Number(sec)));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (d > 0) return `${d}d ${String(h).padStart(2, "0")}h`;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  return `${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+}
+
 /* Read an epoch stamp that is SUPPOSED to be milliseconds, defensively.
  * The collector used to emit updated_at in SECONDS while this file fed it to
  * new Date(), which is a milliseconds API — so the footer clock rendered 1970
@@ -720,9 +734,6 @@ function buildCard(m) {
               <div class="spindle-parts-value" data-f="spindlePartsVal">—</div>
             </div>
           </div>
-          <div class="prog-timeline" data-f="progTimeline">
-            <ol class="prog-timeline-list" data-f="progTimelineList"></ol>
-          </div>
         </div>
         <div class="toolpath" data-f="toolpath">
           <canvas class="toolpath-canvas" data-f="toolpathCanvas"></canvas>
@@ -732,21 +743,158 @@ function buildCard(m) {
             <button type="button" class="toolpath-zoom-btn" data-f="zoomOut" title="Zoom out">−</button>
           </div>
         </div>
-        <div class="cycle-panel">
+        <div class="cycle-panel pw-wallet" data-f="progTimeline">
+          <div class="pw-back" aria-hidden="true"></div>
+          <div class="pw-stack-wrap">
+            <ol class="prog-timeline-list pw-stack" data-f="progTimelineList"></ol>
+            <div class="pw-peek-stage" data-f="pwPeekStage"></div>
+          </div>
+          <div class="pw-pocket" data-f="pwPocket" data-freeze="none">
+            <svg class="pw-pocket-svg" viewBox="0 0 320 156" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="pwLg_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#2b451c" />
+                  <stop offset="52%" stop-color="#1e3313" />
+                  <stop offset="100%" stop-color="#14230c" />
+                </linearGradient>
+                <radialGradient id="pwSh_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" cx="50%" cy="8%" r="72%">
+                  <stop offset="0%" stop-color="rgba(168, 238, 120, 0.16)" />
+                  <stop offset="100%" stop-color="rgba(0, 0, 0, 0)" />
+                </radialGradient>
+                <clipPath id="pwFc_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" clipPathUnits="objectBoundingBox">
+                  <path d="M 0.0375,0.02564 L 0.325,0.02564 C 0.36875,0.02564 0.39688,0.14744 0.45938,0.14744 L 0.54063,0.14744 C 0.60313,0.14744 0.63125,0.02564 0.675,0.02564 L 0.9625,0.02564 Q 1,0.02564 1,0.10256 L 1,0.85897 Q 1,1 0.93125,1 L 0.06875,1 Q 0,1 0,0.85897 L 0,0.10256 Q 0,0.02564 0.0375,0.02564 Z" />
+                </clipPath>
+              </defs>
+              <path class="pw-pocket-fill" fill="url(#pwLg_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" d="M 12,4 L 104,4 C 118,4 127,23 147,23 L 173,23 C 193,23 202,4 216,4 L 308,4 Q 320,4 320,16 L 320,134 Q 320,156 298,156 L 22,156 Q 0,156 0,134 L 0,16 Q 0,4 12,4 Z" />
+              <path class="pw-pocket-sheen" fill="url(#pwSh_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" d="M 12,4 L 104,4 C 118,4 127,23 147,23 L 173,23 C 193,23 202,4 216,4 L 308,4 Q 320,4 320,16 L 320,134 Q 320,156 298,156 L 22,156 Q 0,156 0,134 L 0,16 Q 0,4 12,4 Z" />
+              <path class="pw-pocket-stitch" d="M 14,10 L 102,10 C 114,10 124,29 147,29 L 173,29 C 196,29 206,10 218,10 L 306,10 Q 313,10 313,18 L 313,132 Q 313,149 296,149 L 24,149 Q 7,149 7,132 L 7,18 Q 7,10 14,10 Z" fill="none" vector-effect="non-scaling-stroke" />
+              <path class="pw-pocket-rim" d="M 12,4.5 L 104,4.5 C 118,4.5 127,23.5 147,23.5 L 173,23.5 C 193,23.5 202,4.5 216,4.5 L 308,4.5" fill="none" vector-effect="non-scaling-stroke" />
+            </svg>
+            <div class="pw-frost-back" style="clip-path:url(#pwFc_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" aria-hidden="true">
+              <div class="pw-frost-bed">
+                <svg class="pw-frost-ridge-svg" viewBox="0 0 320 156" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="pwFrBg_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="rgba(232, 246, 255, 0.88)" />
+                      <stop offset="28%" stop-color="rgba(165, 218, 246, 0.64)" />
+                      <stop offset="70%" stop-color="rgba(122, 186, 224, 0.56)" />
+                      <stop offset="100%" stop-color="rgba(216, 240, 255, 0.82)" />
+                    </linearGradient>
+                    <linearGradient id="pwFrSh_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="rgba(255, 255, 255, 0.72)" />
+                      <stop offset="50%" stop-color="rgba(186, 230, 253, 0.24)" />
+                      <stop offset="100%" stop-color="rgba(255, 255, 255, 0.58)" />
+                    </linearGradient>
+                  </defs>
+                  <!-- Main creeping glacial ridge: taller crystal spires on shoulders, cradle across center -->
+                  <path fill="url(#pwFrBg_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" d="M 0,34 L 10,50 L 18,32 L 29,56 L 42,40 L 56,64 L 72,54 L 88,68 L 104,58 L 122,70 L 140,62 L 158,72 L 176,56 L 196,68 L 214,60 L 232,68 L 248,50 L 262,62 L 278,36 L 292,50 L 306,20 L 320,32 L 320,156 L 0,156 Z" />
+                  <!-- Faceted crystalline secondary layer for 3D ice planes -->
+                  <path fill="url(#pwFrSh_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" d="M 0,46 L 16,64 L 28,44 L 44,68 L 62,56 L 80,74 L 106,66 L 130,78 L 154,68 L 180,76 L 206,64 L 234,76 L 258,54 L 282,66 L 304,34 L 320,48 L 320,156 L 0,156 Z" />
+                  <!-- Specular white crystal shard highlights -->
+                  <polygon points="18,32 29,56 15,62" fill="rgba(255,255,255,0.44)" />
+                  <polygon points="42,40 56,64 40,68" fill="rgba(255,255,255,0.34)" />
+                  <polygon points="176,56 196,68 172,76" fill="rgba(255,255,255,0.30)" />
+                  <polygon points="278,36 292,50 274,64" fill="rgba(255,255,255,0.42)" />
+                  <polygon points="306,20 320,32 300,58" fill="rgba(255,255,255,0.48)" />
+                  <!-- Crisp frost-rime ridge outline -->
+                  <path d="M 0,34 L 10,50 L 18,32 L 29,56 L 42,40 L 56,64 L 72,54 L 88,68 L 104,58 L 122,70 L 140,62 L 158,72 L 176,56 L 196,68 L 214,60 L 232,68 L 248,50 L 262,62 L 278,36 L 292,50 L 306,20 L 320,32" fill="none" stroke="rgba(255, 255, 255, 0.86)" stroke-width="1.4" stroke-linejoin="round" />
+                </svg>
+              </div>
+            </div>
             <div class="machine-card-idle-time" data-f="idleTime" hidden>
               <span class="mc-idle-label">STOPPED</span>
               <span class="mc-idle-clock" data-f="idleClock"></span>
             </div>
-            <div class="cycle-panel-head" data-f="cycHead">
-              <span class="cycle-panel-label"><span class="seq-live-dot"></span><span data-f="cycLabel"></span></span>
-              <strong class="cycle-panel-pct" data-f="cycBig"></strong>
+            <div class="pw-pocket-body">
+              <strong class="cycle-panel-pct pw-pct" data-f="cycBig">—</strong>
+              <div class="pw-frost-pause-line" data-f="frostPauseLine" aria-live="polite">
+                <svg class="pw-frost-pause-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                  <path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5M6.2 3.2L8 4.8l1.8-1.6M6.2 12.8L8 11.2l1.8 1.6" />
+                </svg>
+                <span>PAUSED</span>
+                <span class="pw-frost-pause-sep">·</span>
+                <span class="pw-frost-pause-clock" data-f="frostPauseClock">00m 00s</span>
+              </div>
+              <div class="cycle-panel-head pw-sub" data-f="cycHead">
+                <span class="cycle-panel-label pw-sub-label">
+                  <span class="seq-live-dot"></span>
+                  <span class="pw-prog-prefix" data-f="cycProg"></span>
+                  <span data-f="cycLabel"></span>
+                </span>
+              </div>
+              <div class="cycle-panel-bar pw-bar" data-f="barTrack" data-zero="1">
+                <span class="pw-bar-dot" aria-hidden="true"></span>
+                <span class="pw-bar-fill" data-f="bar" style="transition:none">
+                  <span class="pw-bar-flare" aria-hidden="true"></span>
+                </span>
+              </div>
+              <div class="cycle-panel-meta pw-meta">
+                <span data-f="metaLeft"></span>
+                <span data-f="metaRight"></span>
+              </div>
             </div>
-            <div class="cycle-panel-bar"><span data-f="bar" style="transition:none"></span></div>
-            <div class="cycle-panel-meta">
-              <span data-f="metaLeft"></span>
-              <span data-f="metaRight"></span>
+            <div class="pw-frost-front" style="clip-path:url(#pwFc_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" aria-hidden="true">
+              <!-- Foreground pause crystal wraps & hanging icicles over pocket corners -->
+              <svg class="pw-frost-rim-icicles" viewBox="0 0 320 156" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="pwFrBot_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="rgba(224, 242, 254, 0)" />
+                    <stop offset="68%" stop-color="rgba(186, 230, 253, 0.24)" />
+                    <stop offset="100%" stop-color="rgba(240, 249, 255, 0.62)" />
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="96" width="320" height="60" fill="url(#pwFrBot_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" />
+                <!-- Left & right crystalline ice shoulders wrapping the bar -->
+                <path d="M 0,48 L 14,66 L 22,52 L 16,86 L 26,112 L 18,156 L 0,156 Z" fill="rgba(224, 242, 254, 0.42)" stroke="rgba(255,255,255,0.68)" stroke-width="0.9" />
+                <path d="M 320,38 L 306,62 L 296,50 L 304,88 L 294,116 L 302,156 L 320,156 Z" fill="rgba(224, 242, 254, 0.44)" stroke="rgba(255,255,255,0.72)" stroke-width="0.9" />
+                <!-- Delicate icicles dripping just over bar upper edge -->
+                <polygon points="52,72 58,72 55,89" fill="rgba(240,249,255,0.78)" />
+                <polygon points="224,72 232,72 228,94" fill="rgba(240,249,255,0.82)" />
+                <polygon points="236,72 241,72 238.5,84" fill="rgba(224,242,254,0.72)" />
+                <polygon points="28,108 35,108 31.5,128" fill="rgba(240,249,255,0.68)" />
+              </svg>
+              <!-- Full-stop crystalline glacial encasement conforming to pocket thumb-notch -->
+              <div class="pw-frost-encase">
+                <svg class="pw-frost-encase-svg" viewBox="0 0 320 156" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="pwFrRim_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")}" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="rgba(255, 255, 255, 0.94)" />
+                      <stop offset="45%" stop-color="rgba(186, 230, 253, 0.76)" />
+                      <stop offset="100%" stop-color="rgba(240, 249, 255, 0.92)" />
+                    </linearGradient>
+                  </defs>
+                  <!-- Translucent crystalline facet clusters in corners & along notch -->
+                  <polygon points="2,14 48,4 28,36 2,52" fill="rgba(240, 249, 255, 0.36)" />
+                  <polygon points="318,14 270,4 294,40 318,58" fill="rgba(240, 249, 255, 0.38)" />
+                  <polygon points="2,102 36,126 68,154 2,154" fill="rgba(224, 242, 254, 0.42)" />
+                  <polygon points="318,96 282,124 252,154 318,154" fill="rgba(224, 242, 254, 0.44)" />
+                  <polygon points="104,4 134,26 112,34 86,12" fill="rgba(255, 255, 255, 0.28)" />
+                  <polygon points="216,4 186,26 208,34 234,12" fill="rgba(255, 255, 255, 0.28)" />
+                  <!-- Fine crystalline frost fracture veins -->
+                  <path d="M 10,22 L 32,34 L 22,58 M 32,34 L 56,28 M 310,20 L 284,36 L 298,64 M 284,36 L 262,28 M 14,136 L 44,118 L 62,138 M 44,118 L 36,96 M 306,134 L 274,116 L 254,138 M 274,116 L 284,92" fill="none" stroke="rgba(255, 255, 255, 0.44)" stroke-width="1" stroke-linecap="round" />
+                  <!-- Sculpted thick glacial ice rim matching exact thumb-notch path -->
+                  <path d="M 12,4 L 104,4 C 118,4 127,23 147,23 L 173,23 C 193,23 202,4 216,4 L 308,4 Q 320,4 320,16 L 320,134 Q 320,156 298,156 L 22,156 Q 0,156 0,134 L 0,16 Q 0,4 12,4 Z" fill="none" stroke="url(#pwFrRim_${String(m.machine_id || "m").replace(/[^a-zA-Z0-9_-]/g, "")})" stroke-width="5.5" />
+                  <path d="M 14,8 L 102,8 C 115,8 125,27 147,27 L 173,27 C 195,27 205,8 218,8 L 306,8 Q 315,8 315,18 L 315,132 Q 315,151 296,151 L 24,151 Q 5,151 5,132 L 5,18 Q 5,8 14,8 Z" fill="none" stroke="rgba(255, 255, 255, 0.36)" stroke-width="1.2" />
+                </svg>
+              </div>
+              <!-- Lightweight CSS-drifting micro-snowflakes -->
+              <div class="pw-frost-snow">
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+                <svg class="pw-frost-flake" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M13.6 4.75l-11.2 6.5"/></svg>
+              </div>
+              <!-- Centered full-stop status & live ticking timer -->
+              <div class="pw-frost-stop-readout">
+                <span class="pw-frost-stop-label" data-f="frostStopLabel">STOPPED</span>
+                <span class="pw-frost-stop-clock" data-f="frostStopClock">00m 00s</span>
+              </div>
             </div>
           </div>
+        </div>
           </div>
           <div class="card-panel card-panel--bottom shift-vibe-on" data-f="shiftCard" data-shift-phase="morning">
           <div class="shift-vibe" data-f="shiftVibe"></div>
@@ -851,8 +999,12 @@ function updateCard(entry, m) {
   setText(refs.mode, modeLabel(status));
 
   setText(refs.title, m.machine_name || m.machine_id);
-  setText(refs.status, statusText);
-  setClass(refs.status, `status-pill status-${status}`);
+  if (window.VMCStatusPill) {
+    window.VMCStatusPill.updatePill(refs.status, status, statusText, `status-pill status-${status}`);
+  } else {
+    setText(refs.status, statusText);
+    setClass(refs.status, `status-pill status-${status}`);
+  }
   // ACTIVE with 0 RPM cuts nothing: keep ACTIVE->running (chips agree) and
   // flag the spindle box instead — orthogonal warn, never a status fork.
   const noCut = status === "running" && Number(m.spindle_speed) === 0;
@@ -1005,17 +1157,63 @@ function updateCard(entry, m) {
   }
   const tip = est ? `Mathematical estimate from last ${sampleN || "?"} real parts of ${prog || "this program"} (Hurco has no native remaining). IST wall clock.` : "";
   if (refs.cycHead) refs.cycHead.title = tip;
+  let cycText = "";
   if (!cycle.live && est && online) {
-    setText(refs.cycLabel, "CYCLE LEARNING" + (prog ? ` • ${prog}` : "") + (sampleN ? ` • n=${sampleN}/5` : ""));
+    cycText = "CYCLE LEARNING" + (prog ? ` • ${prog}` : "") + (sampleN ? ` • n=${sampleN}/5` : "");
   } else {
-    setText(refs.cycLabel, online
+    cycText = online
       ? (cycle.live
           ? (cycle.overrun ? "CYCLE OVERRUN" + estSuffix : (progressing ? ("CYCLE REMAINING" + estSuffix) : "CYCLE PAUSED" + estSuffix))
           : "NO ACTIVE CYCLE")
-      : "OFFLINE");
+      : "OFFLINE";
   }
-  setClass(refs.cycHead, `cycle-panel-head ${online && progressing ? "seq-live" : "seq-stall"}`);
+  setText(refs.cycLabel, cycText);
+  if (refs.cycProg) {
+    const showPrefix = !!(prog && !cycText.includes(prog));
+    setText(refs.cycProg, showPrefix ? `${prog} · ` : "");
+  }
+  setClass(refs.cycHead, `cycle-panel-head pw-sub ${online && progressing ? "seq-live" : "seq-stall"}`);
   paintCycle(entry);
+
+  // Style 1 — Creeping Glacial Frost state on the front stitched wallet pocket.
+  // Active cutting & alarm/e-stop stay clear; mid-cycle pauses creep frost up
+  // from the bottom; full stops / offline encase the pocket up to its notch.
+  const hasMidCycleProgress = !!(cycle.live || (cycle.pct != null && cycle.pct > 0 && cycle.pct < 100));
+  let freezeMode = "none";
+  let freezeLabel = "STOPPED";
+  if (status === "alarm" || status === "e_stop") {
+    freezeMode = "none";
+    entry.stallSince = null;
+  } else if (status === "running") {
+    if (cycle.live && !progressing && cycle.pct != null && cycle.pct > 0 && cycle.pct < 100) {
+      freezeMode = "pause";
+      if (!entry.stallSince) entry.stallSince = Date.now();
+    } else {
+      freezeMode = "none";
+      entry.stallSince = null;
+    }
+  } else if (status === "paused") {
+    entry.stallSince = null;
+    if (hasMidCycleProgress) {
+      freezeMode = "pause";
+    } else {
+      freezeMode = "stop";
+      freezeLabel = "PAUSED";
+    }
+  } else if (status === "offline" || status === "unavailable") {
+    entry.stallSince = null;
+    freezeMode = "stop";
+    freezeLabel = "OFFLINE";
+  } else {
+    freezeMode = "stop";
+    freezeLabel = "STOPPED";
+    if (!entry.stopSince && !entry.stallSince) entry.stallSince = Date.now();
+    else if (entry.stopSince) entry.stallSince = null;
+  }
+  entry.freezeMode = freezeMode;
+  entry.freezeLabel = freezeLabel;
+  if (refs.pwPocket) setAttr(refs.pwPocket, "data-freeze", freezeMode);
+  if (refs.frostStopLabel) setText(refs.frostStopLabel, freezeLabel);
   updateShiftPanel(entry, m, progressing, fresh);
   updateToolpath(entry, m);
 }
@@ -1534,22 +1732,52 @@ function paintCycle(entry) {
   const refs = entry.refs;
   if (!truth) return;
 
+  const mId = (entry.lastM && entry.lastM.machine_id) || (entry.root && entry.root.dataset.machine) || "";
+  const pushLiveFolio = (pctVal, pctTxt, metaL, metaR, isPaused) => {
+    const pc = mId ? progCache.get(mId) : null;
+    const snap = {
+      pct: pctVal,
+      pctText: pctTxt,
+      label: (refs.cycLabel && refs.cycLabel.textContent) || "Active Cycle Progress",
+      metaLeft: metaL,
+      metaRight: metaR,
+      paused: isPaused,
+      parts: pc && Number.isFinite(pc.count) ? pc.count : (entry.lastM && entry.lastM.part_count != null ? entry.lastM.part_count : null),
+    };
+    entry.liveCycleSnap = snap;
+    if (window.VMC_NC_FOLIO && window.VMC_NC_FOLIO.isOpen()) {
+      window.VMC_NC_FOLIO.syncLive(mId, snap);
+    }
+  };
+
   // Only idle/offline or truly no cycle data hides the bar.
   // When RUNNING (live true) we always render the bar even if estimated/fallback.
   if (!truth.live) {
     // Derive a TOTAL for the LAST label when offline but we still have a stale total
+    const mL = `ELAPSED ${truth.elapsed != null ? fmtClock(truth.elapsed) : "—"}`;
+    const mR = `LAST ${fmtClock(truth.total)}`;
     setText(refs.cycBig, "—");
     setWidth(refs.bar, 0);
-    setText(refs.metaLeft, `ELAPSED ${truth.elapsed != null ? fmtClock(truth.elapsed) : "—"}`);
-    setText(refs.metaRight, `LAST ${fmtClock(truth.total)}`);
+    setAttr(refs.barTrack, "data-zero", "1");
+    setAttr(refs.barTrack, "data-near-end", "0");
+    setAttr(refs.barTrack, "data-paused", "1");
+    setText(refs.metaLeft, mL);
+    setText(refs.metaRight, mR);
+    pushLiveFolio(0, "—", mL, mR, true);
     return;
   }
   if (truth.total == null) {
     // RUNNING but somehow total still null (no fallback found) — no bar to draw
+    const mL = `ELAPSED ${truth.elapsed != null ? fmtClock(truth.elapsed) : "—"}`;
+    const mR = `LAST ${fmtClock(truth.total)}`;
     setText(refs.cycBig, "—");
     setWidth(refs.bar, 0);
-    setText(refs.metaLeft, `ELAPSED ${truth.elapsed != null ? fmtClock(truth.elapsed) : "—"}`);
-    setText(refs.metaRight, `LAST ${fmtClock(truth.total)}`);
+    setAttr(refs.barTrack, "data-zero", "1");
+    setAttr(refs.barTrack, "data-near-end", "0");
+    setAttr(refs.barTrack, "data-paused", "1");
+    setText(refs.metaLeft, mL);
+    setText(refs.metaRight, mR);
+    pushLiveFolio(0, "—", mL, mR, true);
     return;
   }
 
@@ -1557,15 +1785,22 @@ function paintCycle(entry) {
   // Interpolating a stalled timer is precisely the "fake numbers" bug.
   if (!truth.progressing) {
     const pct = truth.pct == null ? 0 : truth.pct;
-    setText(refs.cycBig, `${pct.toFixed(2)}%`);
-    setWidth(refs.bar, pct.toFixed(1));
-    setText(refs.metaLeft, `ELAPSED ${truth.elapsed != null ? fmtClock(truth.elapsed) : "—"}`);
+    const pctTxt = `${pct.toFixed(2)}%`;
+    const mL = `ELAPSED ${truth.elapsed != null ? fmtClock(truth.elapsed) : "—"}`;
     // remaining may be null when derived from elapsed; synthesize for display
     let remDisplay = truth.remaining;
     if (!Number.isFinite(remDisplay) && Number.isFinite(truth.total) && Number.isFinite(truth.elapsed)) {
       remDisplay = Math.max(0, truth.total - truth.elapsed);
     }
-    setText(refs.metaRight, `${fmtClock(remDisplay)} LEFT`);
+    const mR = `${fmtClock(remDisplay)} LEFT`;
+    setText(refs.cycBig, pctTxt);
+    setWidth(refs.bar, pct.toFixed(1));
+    setAttr(refs.barTrack, "data-zero", pct <= 0.3 ? "1" : "0");
+    setAttr(refs.barTrack, "data-near-end", pct >= 89 ? "1" : "0");
+    setAttr(refs.barTrack, "data-paused", "1");
+    setText(refs.metaLeft, mL);
+    setText(refs.metaRight, mR);
+    pushLiveFolio(pct, pctTxt, mL, mR, true);
     return;
   }
 
@@ -1579,11 +1814,18 @@ function paintCycle(entry) {
   const remaining = Math.max(0, baseRem - dt);
   const elapsed = Math.min(truth.total, (truth.elapsed ?? 0) + dt);
   const pct = Math.max(0, Math.min(100, ((truth.total - remaining) / truth.total) * 100));
+  const pctTxt = `${pct.toFixed(2)}%`;
+  const mL = `ELAPSED ${fmtClock(elapsed)}`;
+  const mR = `${fmtClock(remaining)} LEFT`;
 
-  setText(refs.cycBig, `${pct.toFixed(2)}%`);
+  setText(refs.cycBig, pctTxt);
   setWidth(refs.bar, pct.toFixed(1)); // guarded: only writes when the rounded width changes
-  setText(refs.metaLeft, `ELAPSED ${fmtClock(elapsed)}`);
-  setText(refs.metaRight, `${fmtClock(remaining)} LEFT`);
+  setAttr(refs.barTrack, "data-zero", pct <= 0.3 ? "1" : "0");
+  setAttr(refs.barTrack, "data-near-end", pct >= 89 ? "1" : "0");
+  setAttr(refs.barTrack, "data-paused", "0");
+  setText(refs.metaLeft, mL);
+  setText(refs.metaRight, mR);
+  pushLiveFolio(pct, pctTxt, mL, mR, false);
 }
 
 /* Spindle RPM tween toward the latest polled value (no invented data).
@@ -1618,16 +1860,28 @@ function paintSpindle(entry, dt) {
  * this runs at 60fps for every card. */
 function paintIdle(entry) {
   const refs = entry.refs;
-  const elapsedSec = stoppedElapsedSec(entry.stopSince, Date.now());
+  const nowMs = Date.now();
+  const elapsedSec = stoppedElapsedSec(entry.stopSince, nowMs);
   const armed = !!entry.stopSince && elapsedSec >= IDLE_ALERT_AFTER_SEC;
   if (armed !== entry.idleArmed) {
     entry.idleArmed = armed;
-    refs.idleTime.hidden = !armed;
+    if (refs.idleTime) refs.idleTime.hidden = !armed;
     if (armed) entry.root.dataset.idleAlert = "1";
     else delete entry.root.dataset.idleAlert;
   }
-  if (!armed) return;
-  setText(refs.idleClock, fmtIdleDuration(elapsedSec));
+  if (armed && refs.idleClock) {
+    setText(refs.idleClock, fmtIdleDuration(elapsedSec));
+  }
+  const fMode = entry.freezeMode || "none";
+  if (fMode === "pause" && refs.frostPauseClock) {
+    const since = entry.stopSince || entry.stallSince;
+    const pauseSec = since ? stoppedElapsedSec(since, nowMs) : 0;
+    setText(refs.frostPauseClock, fmtFrostDuration(pauseSec));
+  } else if (fMode === "stop" && refs.frostStopClock) {
+    const since = entry.stopSince || entry.stallSince;
+    const stopSec = since ? stoppedElapsedSec(since, nowMs) : 0;
+    setText(refs.frostStopClock, fmtFrostDuration(stopSec));
+  }
 }
 
 
@@ -2076,9 +2330,12 @@ function buildChips() {
   for (const [cls, label] of CHIP_DEFS) {
     const chip = document.createElement("span");
     chip.className = `chip ${cls}`;
+    const ico = window.VMCStatusPill
+      ? `<span class="sp-pill-ico" aria-hidden="true">${window.VMCStatusPill.iconSvg(cls)}</span>`
+      : `<span class="chip-dot"></span>`;
+    chip.innerHTML = `${ico}<span class="sp-pill-lbl">${label}</span> `;
     const count = document.createElement("span");
     count.className = "chip-count";
-    chip.innerHTML = `<span class="chip-dot"></span>${label} `;
     chip.appendChild(count);
     host.appendChild(chip);
     chipEls.set(cls, { count });
@@ -2110,8 +2367,12 @@ function summarize(machines) {
 
 /* ---------- connection state ---------- */
 function setConn(live, text) {
-  dom.conn.className = "conn " + (live ? "live" : "down");
-  dom.connText.textContent = text;
+  if (window.VMCStatusPill) {
+    window.VMCStatusPill.updatePill(dom.conn, live ? "live" : "down", text, "conn " + (live ? "live" : "down"));
+  } else {
+    dom.conn.className = "conn " + (live ? "live" : "down");
+    dom.connText.textContent = text;
+  }
 }
 
 /* ---------- 3D toolpath renderer ----------
@@ -3147,20 +3408,36 @@ function progAge(ts) {
   // Older than 90 days: unset controller clock (1970-era), not real age
   return "—";
 }
-function progTimelineRow(doc, cur, name, meta) {
+function pwCardEl(doc, slotIdx, item, fallbackText) {
   const li = doc.createElement("li");
-  li.className = cur ? "prog-tl-row prog-tl-cur" : "prog-tl-row";
-  const dot = doc.createElement("span");
-  dot.className = "prog-tl-dot";
-  dot.textContent = cur ? "" : "✓";
+  const isEmpty = !item;
+  li.className = `pw-card pw-card--${slotIdx}${isEmpty ? " pw-card--empty" : ""}`;
+  li.dataset.slot = String(slotIdx);
+  if (isEmpty) {
+    if (!fallbackText) li.setAttribute("aria-hidden", "true");
+    const nm = doc.createElement("span");
+    nm.className = "pw-card-name";
+    nm.textContent = fallbackText || "\u00a0";
+    const mm = doc.createElement("span");
+    mm.className = "pw-card-meta";
+    mm.textContent = fallbackText ? "—" : "\u00a0";
+    li.append(nm, mm);
+    return li;
+  }
+  const age = progAge(item.from);
+  const partsText = item.count != null ? `${fmtInt(item.count)} pcs` : age;
+  li.setAttribute("role", "button");
+  li.setAttribute("tabindex", "0");
+  li.setAttribute("aria-label", `Inspect NC program ${item.name} (${partsText})`);
+  li.title = `${item.name} · ${item.count != null ? fmtInt(item.count) + " parts" : "no count"} · ${age} — click for full NC summary`;
+  li._pwJob = item;
   const nm = doc.createElement("span");
-  nm.className = "prog-tl-name";
-  nm.textContent = name;
-  nm.title = name;
+  nm.className = "pw-card-name";
+  nm.textContent = item.name;
   const mm = doc.createElement("span");
-  mm.className = "prog-tl-meta";
-  mm.textContent = meta;
-  li.append(dot, nm, mm);
+  mm.className = "pw-card-meta";
+  mm.textContent = partsText;
+  li.append(nm, mm);
   return li;
 }
 function paintProgTimeline(entry) {
@@ -3170,54 +3447,43 @@ function paintProgTimeline(entry) {
   const m = entry.lastM || {};
   const machineId = m.machine_id || (entry.root && entry.root.dataset.machine) || "";
   const prog = m.active_program || "";
-  const cached = progCache.get(machineId) || {};
-  const liveCount = (cached.prog === prog && Number.isFinite(cached.count)) ? cached.count
-    : (m.part_count_total ?? m.part_count);
+  if (refs.pwPocket) {
+    const canInspectLive = Boolean(prog);
+    refs.pwPocket.classList.toggle("pw-pocket--interactive", canInspectLive);
+    if (canInspectLive) {
+      refs.pwPocket.setAttribute("role", "button");
+      refs.pwPocket.setAttribute("tabindex", "0");
+      refs.pwPocket.setAttribute("aria-label", `Inspect active NC program ${prog}`);
+      refs.pwPocket.title = `${prog} — click for live NC summary`;
+    } else {
+      refs.pwPocket.removeAttribute("role");
+      refs.pwPocket.removeAttribute("tabindex");
+      refs.pwPocket.removeAttribute("aria-label");
+      refs.pwPocket.removeAttribute("title");
+    }
+  }
   const hist = histCache.get(machineId);
+  // Up to 4 recent completed programs stacked behind the live cycle pocket.
   const rows = hist ? rankProgRuns(hist.prog, hist.cnt, prog).slice(0, 4) : [];
-  const sig = `${prog}|${liveCount}|${rows.map((r) => `${r.name}:${r.count}`).join(",")}`;
+  const sig = rows.map((r) => `${r.name}:${r.count ?? ""}:${r.to ?? ""}:${progAge(r.from)}`).join("|") + `|${prog ? "1" : "0"}`;
   if (entry.tlSig === sig) return;
   entry.tlSig = sig;
   list.innerHTML = "";
   const doc = list.ownerDocument;
-  // Five slots always: the box keeps one fixed height on every card, so a
-  // machine with no earlier jobs never collapses its section out of line.
-  const TOTAL_SLOTS = 5;
-  let rendered = 0;
-  if (!prog && !rows.length) {
-    const li = doc.createElement("li");
-    li.className = "prog-tl-row prog-tl-empty";
-    li.textContent = "No jobs yet.";
-    list.appendChild(li);
-    rendered = 1;
-  } else {
-    if (prog) {
-      list.appendChild(progTimelineRow(doc, true, prog,
-        `${Number.isFinite(liveCount) ? fmtInt(liveCount) : "—"} · now`));
-      rendered = 1;
-    }
-    for (const r of rows) {
-      if (rendered >= TOTAL_SLOTS) break;
-      list.appendChild(progTimelineRow(doc, false, r.name,
-        `${r.count != null ? fmtInt(r.count) : "—"} · ${progAge(r.from)}`));
-      rendered++;
-    }
+  // Always render 4 layered slots (slot 0 top/oldest -> slot 3 front-most right
+  // above the pocket thumb-notch) so card height and wallet cadence stay uniform.
+  const SLOTS = 4;
+  const pad = SLOTS - rows.length;
+  // Reverse rows so the most recently completed job sits in front (slot 3).
+  const ordered = rows.slice().reverse();
+  entry.pwSlotJobs = [];
+  for (let i = 0; i < SLOTS; i++) {
+    const item = i >= pad ? ordered[i - pad] : null;
+    if (item) entry.pwSlotJobs.push({ ...item, slotIdx: i });
+    const fallback = (!rows.length && i === SLOTS - 1) ? "No prior jobs" : "";
+    list.appendChild(pwCardEl(doc, i, item, fallback));
   }
-  for (let i = rendered; i < TOTAL_SLOTS; i++) {
-    const li = doc.createElement("li");
-    li.className = "prog-tl-row prog-tl-pad";
-    li.setAttribute("aria-hidden", "true");
-    const dot = doc.createElement("span");
-    dot.className = "prog-tl-dot";
-    const nm = doc.createElement("span");
-    nm.className = "prog-tl-name";
-    nm.textContent = " ";
-    const mm = doc.createElement("span");
-    mm.className = "prog-tl-meta";
-    mm.textContent = " ";
-    li.append(dot, nm, mm);
-    list.appendChild(li);
-  }
+  if (typeof syncActiveWalletPeek === "function") syncActiveWalletPeek(machineId);
 }
 function rankProgRuns(progRows, cntRows, currentProg) {
   const prog = progRows.slice().sort((a, b) => {
@@ -3241,7 +3507,7 @@ function rankProgRuns(progRows, cntRows, currentProg) {
   const out = [];
   for (let i = 0; i < runs.length && out.length < 5; i++) {
     if (i === 0 && runs[i].name === currentProg) continue;
-    out.push({ name: runs[i].name, from: runs[i].from, count: countSegParts(cnt, runs[i].from, runs[i].to) });
+    out.push({ name: runs[i].name, from: runs[i].from, to: runs[i].to, count: countSegParts(cnt, runs[i].from, runs[i].to) });
   }
   return out;
 }
@@ -3360,10 +3626,302 @@ function setupPartsPop() {
     if (card && card.dataset.machine) openPartsPop(card.dataset.machine);
   });
 }
-/* Esc closes popover first, then the settings panel. */
+function openWalletFolio(machineId, targetKey, sourceEl, originRect) {
+  if (!window.VMC_NC_FOLIO || !machineId) return;
+  const entry = cardEls.get(machineId);
+  if (!entry) return;
+  const m = entry.lastM || {};
+  const machineName = m.display_name || m.name || machineId;
+  const hist = histCache.get(machineId);
+  const cntRows = (hist && hist.cnt) || [];
+  const progRows = (hist && hist.prog) || [];
+
+  const slots = [];
+  const histJobs = Array.isArray(entry.pwSlotJobs) ? entry.pwSlotJobs : [];
+  for (const j of histJobs) {
+    const fromMs = tsMs(j.from);
+    const toMsVal = j.to != null ? tsMs(j.to) : NaN;
+    const initialCycles = Number.isFinite(fromMs)
+      ? window.VMC_NC_FOLIO.extractPartCycles(cntRows, fromMs, Number.isFinite(toMsVal) ? toMsVal : Date.now())
+      : [];
+    slots.push({
+      slotIdx: j.slotIdx,
+      name: j.name,
+      from: j.from,
+      to: j.to,
+      count: j.count,
+      live: false,
+      initialCycles,
+    });
+  }
+
+  const activeProg = m.active_program || "";
+  if (activeProg) {
+    const pc = progCache.get(machineId) || {};
+    let liveFrom = pc.prog === activeProg && Number.isFinite(Number(pc.startedAt)) ? Number(pc.startedAt) : null;
+    if (liveFrom == null && progRows.length) {
+      const sorted = progRows.slice().sort((a, b) => a.ts - b.ts);
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        if (sorted[i].val === activeProg) liveFrom = sorted[i].ts;
+        else if (liveFrom != null) break;
+      }
+    }
+    const fromMs = liveFrom != null ? tsMs(liveFrom) : NaN;
+    const initialCycles = Number.isFinite(fromMs)
+      ? window.VMC_NC_FOLIO.extractPartCycles(cntRows, fromMs, Date.now())
+      : [];
+    const liveCount = pc.prog === activeProg && Number.isFinite(pc.count)
+      ? pc.count
+      : (m.part_count != null ? m.part_count : null);
+    const sh = entry.shiftTruth;
+    const shiftLabel = sh && sh.shift
+      ? `${shortShiftTag(sh.shift)} ${SHIFT_PHASE_LABEL[String(sh.shift).padStart(2, "0")] || ""}`.trim()
+      : "";
+    slots.push({
+      slotIdx: "live",
+      name: activeProg,
+      from: liveFrom,
+      to: null,
+      count: liveCount,
+      live: true,
+      shiftLabel,
+      liveSnap: entry.liveCycleSnap || null,
+      initialCycles,
+    });
+  }
+
+  if (!slots.length) return;
+  let initialIdx = slots.findIndex((s) =>
+    targetKey === "live" ? s.live : (!s.live && String(s.slotIdx) === String(targetKey))
+  );
+  if (initialIdx < 0) initialIdx = slots.length - 1;
+
+  window.VMC_NC_FOLIO.open({
+    machineId,
+    machineName,
+    apiBase: state.apiBase || "",
+    slots,
+    initialIdx,
+    sourceEl,
+    originRect: originRect || null,
+  });
+}
+
+/* ---------- Step 2: In-Place Slide-Up Quick Preview Controller ----------
+ * 1st click on a peeking NC card slides that exact card up in-place inside its
+ * wallet above the dimmed sibling stack (Start->End, Duration, Parts, tap cue).
+ * 2nd click on that slid-up card launches Step 3 (Full Style 1 Pastel Unfold)
+ * smoothly from the Step 2 card's live viewport rectangle. */
+let activeWalletPeek = null; // { machineId, slotIdx, jobName, walletEl, stageEl, cardEl, srcEl }
+
+function buildPeekCardEl(doc, slotIdx, job) {
+  const fromMs = tsMs(job.from);
+  const toMsVal = job.to != null ? tsMs(job.to) : NaN;
+  const folioApi = window.VMC_NC_FOLIO || {};
+  const startTxt = Number.isFinite(fromMs) && folioApi.fmtClock ? folioApi.fmtClock(fromMs) : "—";
+  const endTxt = Number.isFinite(toMsVal) && folioApi.fmtClock ? folioApi.fmtClock(toMsVal) : "—";
+  const durMs = Number.isFinite(fromMs) && Number.isFinite(toMsVal) && toMsVal >= fromMs ? toMsVal - fromMs : NaN;
+  const durTxt = Number.isFinite(durMs) && folioApi.fmtDur ? folioApi.fmtDur(durMs) : "—";
+  const shiftTxt = Number.isFinite(fromMs) && folioApi.shiftShort ? folioApi.shiftShort(fromMs) : "";
+  const partsTxt = job.count != null ? `${fmtInt(job.count)} pcs` : progAge(job.from);
+
+  const el = doc.createElement("div");
+  el.className = "pw-peek-card";
+  el.dataset.slot = String(slotIdx);
+  el.setAttribute("role", "button");
+  el.setAttribute("tabindex", "0");
+  el.setAttribute("aria-label", `${job.name}, ${startTxt} to ${endTxt}, ${durTxt}, ${partsTxt}. Activate again for full NC summary.`);
+
+  const head = doc.createElement("div");
+  head.className = "pw-peek-head";
+  const nm = doc.createElement("span");
+  nm.className = "pw-peek-name";
+  nm.textContent = job.name;
+  const pts = doc.createElement("span");
+  pts.className = "pw-peek-parts";
+  pts.textContent = partsTxt;
+  head.append(nm, pts);
+
+  const mid = doc.createElement("div");
+  mid.className = "pw-peek-mid";
+  const span = doc.createElement("span");
+  span.className = "pw-peek-span";
+  span.textContent = `${startTxt} → ${endTxt}`;
+  const dur = doc.createElement("span");
+  dur.className = "pw-peek-dur";
+  dur.textContent = shiftTxt ? `${durTxt} · ${shiftTxt}` : durTxt;
+  mid.append(span, dur);
+
+  const cue = doc.createElement("div");
+  cue.className = "pw-peek-cue";
+  cue.textContent = "Tap again for full summary ↗";
+
+  el.append(head, mid, cue);
+  return el;
+}
+
+function closeWalletPeek(immediate) {
+  if (!activeWalletPeek) return;
+  const pk = activeWalletPeek;
+  activeWalletPeek = null;
+  if (pk.walletEl) pk.walletEl.classList.remove("pw-wallet--peeking");
+  if (pk.srcEl) pk.srcEl.classList.remove("pw-card--peek-src");
+
+  const cardEl = pk.cardEl;
+  const stageEl = pk.stageEl;
+  if (!cardEl) return;
+
+  const removeEl = () => {
+    if (cardEl.parentNode === stageEl) stageEl.removeChild(cardEl);
+  };
+  if (immediate || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+    removeEl();
+    return;
+  }
+  cardEl.classList.remove("is-open");
+  setTimeout(removeEl, 210);
+}
+
+function openWalletPeek(machineId, slotIdx, srcEl) {
+  const entry = cardEls.get(machineId);
+  if (!entry || !entry.refs) return;
+  const walletEl = entry.refs.progTimeline;
+  const stageEl = entry.refs.pwPeekStage;
+  if (!walletEl || !stageEl) return;
+  const jobs = Array.isArray(entry.pwSlotJobs) ? entry.pwSlotJobs : [];
+  const job = jobs.find((j) => String(j.slotIdx) === String(slotIdx));
+  if (!job) return;
+
+  // Switching from an existing Step 2 card: clear previous cleanly first
+  if (activeWalletPeek) closeWalletPeek(true);
+
+  stageEl.innerHTML = "";
+  const cardEl = buildPeekCardEl(stageEl.ownerDocument, slotIdx, job);
+  stageEl.appendChild(cardEl);
+  walletEl.classList.add("pw-wallet--peeking");
+  if (srcEl) srcEl.classList.add("pw-card--peek-src");
+
+  activeWalletPeek = {
+    machineId,
+    slotIdx: String(slotIdx),
+    jobName: job.name,
+    walletEl,
+    stageEl,
+    cardEl,
+    srcEl: srcEl || null,
+  };
+
+  // Trigger compositor slide-up animation on next frame
+  void cardEl.offsetWidth;
+  requestAnimationFrame(() => {
+    if (activeWalletPeek && activeWalletPeek.cardEl === cardEl) {
+      cardEl.classList.add("is-open");
+      cardEl.focus({ preventScroll: true });
+    }
+  });
+}
+
+function syncActiveWalletPeek(machineId) {
+  if (!activeWalletPeek || activeWalletPeek.machineId !== machineId) return;
+  const entry = cardEls.get(machineId);
+  const jobs = (entry && Array.isArray(entry.pwSlotJobs)) ? entry.pwSlotJobs : [];
+  const match = jobs.find((j) => j.name === activeWalletPeek.jobName && String(j.slotIdx) === activeWalletPeek.slotIdx)
+    || jobs.find((j) => j.name === activeWalletPeek.jobName);
+  if (!match) {
+    closeWalletPeek(false);
+    return;
+  }
+  const newSrc = entry.refs.progTimelineList && entry.refs.progTimelineList.querySelector(`.pw-card[data-slot="${match.slotIdx}"]`);
+  if (activeWalletPeek.srcEl && activeWalletPeek.srcEl !== newSrc) {
+    activeWalletPeek.srcEl.classList.remove("pw-card--peek-src");
+  }
+  activeWalletPeek.slotIdx = String(match.slotIdx);
+  activeWalletPeek.srcEl = newSrc || null;
+  if (newSrc) newSrc.classList.add("pw-card--peek-src");
+  // Update displayed parts / timing silently without re-animating
+  const fresh = buildPeekCardEl(activeWalletPeek.stageEl.ownerDocument, match.slotIdx, match);
+  fresh.classList.add("is-open");
+  activeWalletPeek.stageEl.innerHTML = "";
+  activeWalletPeek.stageEl.appendChild(fresh);
+  activeWalletPeek.cardEl = fresh;
+}
+
+function setupWalletFolio() {
+  if (!dom.grid) return;
+  const triggerFromTarget = (target) => {
+    if (!target || !target.closest) return false;
+
+    // Step 2 -> Step 3: 2nd click on the slid-up quick preview card expands to full summary
+    const peekCard = target.closest(".pw-peek-card");
+    if (peekCard && dom.grid.contains(peekCard) && activeWalletPeek && activeWalletPeek.cardEl === peekCard) {
+      const { machineId, slotIdx, srcEl } = activeWalletPeek;
+      const originRect = peekCard.getBoundingClientRect();
+      closeWalletPeek(true);
+      openWalletFolio(machineId, slotIdx, srcEl, originRect);
+      return true;
+    }
+
+    // Step 1 -> Step 2 (or switch Step 2 slot): 1st click on any peeking NC card slides it up in-place
+    const pwCard = target.closest(".pw-card:not(.pw-card--empty)");
+    if (pwCard && dom.grid.contains(pwCard)) {
+      const mc = pwCard.closest(".machine-card");
+      if (mc && mc.dataset.machine) {
+        const machineId = mc.dataset.machine;
+        const slotIdx = String(pwCard.dataset.slot);
+        // If somehow clicking the exact same underlying slot while already peeked, advance to Step 3
+        if (activeWalletPeek && activeWalletPeek.machineId === machineId && activeWalletPeek.slotIdx === slotIdx) {
+          const originRect = activeWalletPeek.cardEl ? activeWalletPeek.cardEl.getBoundingClientRect() : null;
+          closeWalletPeek(true);
+          openWalletFolio(machineId, slotIdx, pwCard, originRect);
+        } else {
+          openWalletPeek(machineId, slotIdx, pwCard);
+        }
+        return true;
+      }
+    }
+
+    // Active front forest-green pocket opens Step 3 Live Full Summary directly in 1 click
+    const pwPocket = target.closest(".pw-pocket.pw-pocket--interactive");
+    if (pwPocket && dom.grid.contains(pwPocket)) {
+      const mc = pwPocket.closest(".machine-card");
+      if (mc && mc.dataset.machine) {
+        if (activeWalletPeek) closeWalletPeek(true);
+        openWalletFolio(mc.dataset.machine, "live", pwPocket, null);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  dom.grid.addEventListener("click", (e) => {
+    triggerFromTarget(e.target);
+  });
+  dom.grid.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (triggerFromTarget(e.target)) e.preventDefault();
+  });
+
+  // Clicking anywhere outside the active wallet smoothly tucks Step 2 back to Step 1
+  document.addEventListener("click", (e) => {
+    if (!activeWalletPeek) return;
+    if (e.target && activeWalletPeek.walletEl && activeWalletPeek.walletEl.contains(e.target)) return;
+    closeWalletPeek(false);
+  });
+}
+
+/* Esc closes Step 3 NC folio first, then Step 2 slide-up preview, then popover, then settings panel. */
 function setupDashOverlays() {
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (window.VMC_NC_FOLIO && window.VMC_NC_FOLIO.isOpen()) { window.VMC_NC_FOLIO.close(); return; }
+    if (activeWalletPeek) {
+      const retFocus = activeWalletPeek.srcEl;
+      closeWalletPeek(false);
+      if (retFocus && typeof retFocus.focus === "function" && document.body.contains(retFocus)) {
+        try { retFocus.focus({ preventScroll: true }); } catch (_) {}
+      }
+      return;
+    }
     if (partsPopEls && !partsPopEls.pop.hidden) { closePartsPop(); return; }
     if (dashCfgEls && !dashCfgEls.panel.hidden) closeDashCfg();
   });
@@ -3420,6 +3978,7 @@ function start() {
   setupFullscreen();
   setupDashCfg();
   setupPartsPop();
+  setupWalletFolio();
   setupDashOverlays();
   applyPrefsToDom();
   // Instant cold-start paint: show the last good board from the device snapshot

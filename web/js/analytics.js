@@ -134,7 +134,7 @@ function renderErrorRow(host, rowEls, id, m, err) {
     root.innerHTML = `
       <div class="ds-row-head">
         <span class="ds-row-name" data-f="name"></span>
-        <span class="ds-row-conf conf-bad" data-f="conf" role="status">ERROR</span>
+        <span class="ds-row-conf conf-bad" data-f="conf" role="status">${window.VMCStatusPill ? window.VMCStatusPill.innerMarkup("error", "ERROR") : "ERROR"}</span>
       </div>
       <p class="ds-note" data-f="errMsg" role="alert" style="margin: 1rem 0;"></p>`;
     host.appendChild(root);
@@ -200,8 +200,12 @@ function renderRow(host, rowEls, id, m, x, win, conf) {
   }
   const r = el.refs;
   r.name.textContent = m.machine_name || id;
-  r.conf.className = `ds-row-conf conf-${conf.level}`;
-  r.conf.textContent = conf.label;
+  if (window.VMCStatusPill) {
+    window.VMCStatusPill.updatePill(r.conf, conf.level, conf.label, `ds-row-conf conf-${conf.level}`);
+  } else {
+    r.conf.className = `ds-row-conf conf-${conf.level}`;
+    r.conf.textContent = conf.label;
+  }
 
   setKpi(r.oee, fmtPct(x.oee), oeeClass(x.oee));
   setKpi(r.util, fmtPct(x.utilization));
@@ -217,9 +221,10 @@ function renderRow(host, rowEls, id, m, x, win, conf) {
 
   const ov = x.ovr;
   r.ovr.innerHTML = ovrText(ov);
+  const sp = window.VMCStatusPill;
   r.estop.innerHTML = x.estopEvents.count > 0
-    ? `<span class="ds-flag ds-flag-bad">E-STOP ×${x.estopEvents.count}</span>`
-    : `<span class="ds-flag ds-flag-ok">no e-stop</span>`;
+    ? `<span class="ds-flag ds-flag-bad">${sp ? sp.innerMarkup("alarm", `E-STOP ×${x.estopEvents.count}`) : `E-STOP ×${x.estopEvents.count}`}</span>`
+    : `<span class="ds-flag ds-flag-ok">${sp ? sp.innerMarkup("ok", "no e-stop") : "no e-stop"}</span>`;
 }
 
 function setKpi(node, text, cls) {

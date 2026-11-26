@@ -170,9 +170,13 @@ function fire(a) {
 function toast(a) {
   if (!toastHost) return;
   const t = document.createElement("div");
-  t.className = `alert-toast sev-${SEV_NAME[a.sev].toLowerCase()}${a.lowConfidence ? " low-conf" : ""}`;
+  const sevKey = SEV_NAME[a.sev].toLowerCase();
+  t.className = `alert-toast sev-${sevKey}${a.lowConfidence ? " low-conf" : ""}`;
+  const sevInner = window.VMCStatusPill
+    ? window.VMCStatusPill.innerMarkup(sevKey, SEV_NAME[a.sev])
+    : escapeHtml(SEV_NAME[a.sev]);
   t.innerHTML = `
-    <span class="alert-toast-sev">${escapeHtml(SEV_NAME[a.sev])}</span>
+    <span class="alert-toast-sev">${sevInner}</span>
     <span class="alert-toast-body"><strong>${escapeHtml(a.name)}</strong> ${escapeHtml(a.msg)}${a.lowConfidence ? ' <em>· low-confidence data</em>' : ""}</span>
     <button type="button" class="alert-toast-x">×</button>`;
   t.querySelector(".alert-toast-x").addEventListener("click", () => t.remove());
@@ -192,12 +196,18 @@ function renderList() {
   if (!listEl) return;
   const rows = log.filter((a) => a.sev >= filterSev);
   if (!rows.length) { listEl.innerHTML = `<div class="alert-empty">No alerts.</div>`; return; }
-  listEl.innerHTML = rows.map((a) => `
-    <div class="alert-row sev-${SEV_NAME[a.sev].toLowerCase()}">
-      <span class="alert-row-sev">${escapeHtml(SEV_NAME[a.sev])}</span>
+  listEl.innerHTML = rows.map((a) => {
+    const sevKey = SEV_NAME[a.sev].toLowerCase();
+    const sevInner = window.VMCStatusPill
+      ? window.VMCStatusPill.innerMarkup(sevKey, SEV_NAME[a.sev])
+      : escapeHtml(SEV_NAME[a.sev]);
+    return `
+    <div class="alert-row sev-${sevKey}">
+      <span class="alert-row-sev">${sevInner}</span>
       <span class="alert-row-body"><strong>${escapeHtml(a.name)}</strong> ${escapeHtml(a.msg)}${a.lowConfidence ? ' <em>· low-conf</em>' : ""}</span>
       <span class="alert-row-time">${new Date(a.ts).toLocaleTimeString()}</span>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 /* ---------- poll loop ---------- */
@@ -227,8 +237,17 @@ async function tick() {
   catch (_) { lowConfidence = true; }
   const conf = panel && panel.querySelector('[data-f="conf"]');
   if (conf) {
-    conf.textContent = lowConfidence ? "⚠ data gaps" : "gapless";
-    conf.className = `alert-conf ${lowConfidence ? "is-bad" : "is-ok"}`;
+    if (window.VMCStatusPill) {
+      window.VMCStatusPill.updatePill(
+        conf,
+        lowConfidence ? "warn" : "ok",
+        lowConfidence ? "data gaps" : "gapless",
+        `alert-conf ${lowConfidence ? "is-bad" : "is-ok"}`
+      );
+    } else {
+      conf.textContent = lowConfidence ? "⚠ data gaps" : "gapless";
+      conf.className = `alert-conf ${lowConfidence ? "is-bad" : "is-ok"}`;
+    }
   }
 }
 

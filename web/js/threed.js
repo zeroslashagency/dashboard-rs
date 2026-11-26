@@ -609,7 +609,7 @@ function paintHud(refs, ctx) {
   refs.hud.innerHTML = `
     <div class="td-hud-top">
       <span class="td-hud-name">${ctx.selected}</span>
-      <span class="td-hud-badge is-live">● LIVE</span>
+      <span class="td-hud-badge is-live">${window.VMCStatusPill ? window.VMCStatusPill.innerMarkup("live", "LIVE") : "● LIVE"}</span>
     </div>
     <div class="td-hud-prog">${esc(m.active_program || "—")}</div>
     <div class="td-hud-grid">
@@ -636,7 +636,7 @@ function paintReadout(refs, ctx) {
     return `<tr class="${sel ? "is-sel" : ""}">
       <td class="td-ro-name">${id}${sel ? ' <span class="td-ro-focus">focus</span>' : ""}${noZ ? ' <span class="td-ro-flag" title="This machine does not emit a Z axis — path is shown on the Z=0 plane, not fabricated depth.">2.5D · no Z</span>' : ""}</td>
       <td>${esc(o.active_program || "—")}</td>
-      <td>${(o.status || "—")}</td>
+      <td>${o.status ? `<span class="td-ro-status st-${esc(String(o.status).toLowerCase())}">${window.VMCStatusPill ? window.VMCStatusPill.innerMarkup(String(o.status).toLowerCase(), o.status) : esc(o.status)}</span>` : "—"}</td>
       <td class="td-ro-n">${pts.length}</td>
       <td class="td-ro-n">${span ? fmtDur(span) : "—"}</td>
       <td class="td-ro-n">${mix.cut}%</td>
