@@ -1,7 +1,7 @@
 /* VMC God-mode — navigation router + view orchestration.
  *
- * Adds a 7-tab nav bar between the topbar and the content. Tabs:
- *   Dashboard | KPI | Analytics | 3D | Maintenance | Statistics
+ * Adds a tabbed nav bar between the topbar and the content. Tabs:
+ *   Dashboard | KPI | Analytics | Timeline | Maintenance | Statistics
  *
  * The Dashboard tab IS the existing mission-card grid (#machineGrid) — we only
  * show/hide it, never touch its render loop or markup. Every other tab mounts an
@@ -17,9 +17,7 @@ import { mountAnalytical } from "./analytics.js";
 import { mountKpi } from "./kpi.js";
 import { mountStatistics } from "./statistics.js";
 import { mountMaintenance } from "./maintenance.js";
-import { mountThreeD } from "./threed.js";
 import { mountTimeline } from "./timeline.js";
-import { mountDataLab } from "./datalab.js";
 import { initAlerts } from "./alerts.js";
 
 const REFRESH_MS = 15000;
@@ -29,10 +27,8 @@ const REFRESH_MS = 15000;
 const TABS = [
   { id: "dashboard", label: "Dashboard", grid: true },
   { id: "kpi", label: "KPI", builder: mountKpi, window: true, title: "KPI Overview", sub: "fleet OEE · stacked throughput · time mix · program drift" },
-  { id: "analytics", label: "Analytics", builder: mountAnalytical, window: true, title: "Data Science · Analytical", sub: "what happened and why — every metric gapless-audited" },
-  { id: "threed", label: "3D", builder: mountThreeD, window: false, title: "Toolpath Theatre", sub: "live traced cutting path · overlay machines — all from real XYZ, current cycle" },
+  { id: "analytics", label: "Analytics", builder: mountAnalytical, window: true, title: "Root-Cause Analytics", sub: "synchronized fleet timeline · downtime Pareto · override discipline · fault diagnostics" },
   { id: "timeline", label: "Timeline", builder: mountTimeline, window: false, title: "Production Timeline", sub: "" },
-  { id: "datalab", label: "Data Lab", builder: mountDataLab, window: true, title: "Data Lab", sub: "data-science workbench — 8 views, every one from a real signal" },
   { id: "maintenance", label: "Maintenance", builder: mountMaintenance, window: true, title: "Maintenance", sub: "predictive console — health · risk projections · trends · event log, all from real signals" },
   { id: "statistics", label: "Statistics", builder: mountStatistics, window: true, title: "Statistics", sub: "cycle distributions, downtime Pareto, reliability, drift" },
 ];
@@ -100,7 +96,7 @@ function activate(id) {
   const prev = views.get(activeId);
   if (prev && prev.refreshTimer) { clearInterval(prev.refreshTimer); prev.refreshTimer = null; }
   // Tear down the view we're leaving so its loops/GPU contexts don't linger.
-  // Views that own rAF loops or WebGL contexts (3D, Timeline, Data Lab) expose
+  // Views that own rAF loops or heavy canvas contexts (Timeline) expose
   // destroy(); after teardown they re-mount fresh on next activation.
   if (prev && prev.ctl && typeof prev.ctl.destroy === "function") {
     try { prev.ctl.destroy(); } catch (_) {}
@@ -110,8 +106,8 @@ function activate(id) {
 
   activeId = id;
   localStorage.setItem("vmc_tab", id);
-  // let the aurora background know the active tab so it can pause itself on the
-  // GPU-heavy views (3D / Timeline / Data Lab) instead of stacking canvas work.
+  // let the aurora background know the active tab so it can pause itself on
+  // heavy canvas views (Timeline) instead of stacking canvas work.
   window.dispatchEvent(new CustomEvent("vmc-tab", { detail: { id } }));
 
   document.querySelectorAll(".godnav-tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === id));

@@ -139,8 +139,6 @@
 .alert-conf,
 .alert-toast-sev,
 .alert-row-sev,
-.td-hud-badge,
-.td-ro-status,
 .mt-tl-chip,
 .mt-tool-tag,
 .stat-sub.conf-bad {
@@ -202,7 +200,6 @@
 .ds-row-conf.conf-ok,
 .ds-flag.ds-flag-ok,
 .alert-conf.is-ok,
-.td-ro-status.st-running,
 .mt-tl-chip.kind-program {
   --sp-bg-top: var(--sp-green-top);
   --sp-bg-bot: var(--sp-green-bot);
@@ -219,7 +216,6 @@
 .chip.idle,
 .alert-toast.sev-info .alert-toast-sev,
 .alert-row.sev-info .alert-row-sev,
-.td-ro-status.st-idle,
 .mt-tl-chip.kind-tool {
   --sp-bg-top: var(--sp-blue-top);
   --sp-bg-bot: var(--sp-blue-bot);
@@ -239,9 +235,6 @@
 .alert-conf.is-bad,
 .alert-toast.sev-warning .alert-toast-sev,
 .alert-row.sev-warning .alert-row-sev,
-.td-hud-badge.is-replay,
-.td-ro-status.st-paused,
-.td-ro-status.st-setup_manual,
 .mt-tl-chip.kind-hold,
 .mt-tool.is-warn .mt-tool-tag {
   --sp-bg-top: var(--sp-amber-top);
@@ -264,8 +257,6 @@
 .ds-flag.ds-flag-bad,
 .alert-toast.sev-critical .alert-toast-sev,
 .alert-row.sev-critical .alert-row-sev,
-.td-ro-status.st-alarm,
-.td-ro-status.st-e_stop,
 .mt-tl-chip.kind-alarm,
 .mt-tl-chip.kind-estop,
 .mt-tool.is-bad .mt-tool-tag,
@@ -287,10 +278,7 @@
 .status-pill.status-offline,
 .status-pill.status-unavailable,
 .status-pill.status-unknown,
-.chip.offline,
-.td-ro-status.st-offline,
-.td-ro-status.st-unavailable,
-.td-ro-status.st-unknown {
+.chip.offline {
   --sp-bg-top: var(--sp-gray-top);
   --sp-bg-bot: var(--sp-gray-bot);
   --sp-bdr: var(--sp-gray-bdr);
@@ -302,8 +290,7 @@
 }
 
 /* Luminous Cyan — LIVE */
-.conn.live,
-.td-hud-badge.is-live {
+.conn.live {
   --sp-bg-top: var(--sp-cyan-top);
   --sp-bg-bot: var(--sp-cyan-bot);
   --sp-bdr: var(--sp-cyan-bdr);
@@ -376,8 +363,6 @@
 .alert-conf,
 .alert-toast-sev,
 .alert-row-sev,
-.td-hud-badge,
-.td-ro-status,
 .mt-tl-chip,
 .mt-tool-tag,
 .stat-sub.conf-bad {
@@ -388,18 +373,6 @@
   font-weight: 700;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
-}
-
-.td-hud-badge {
-  font-size: 0.68rem;
-  letter-spacing: 0.05em;
-  padding: 3px 9px 3px 6px;
-}
-
-.td-ro-status {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  padding: 2.5px 8px 2.5px 6px;
 }
 
 .alert-toast-sev {

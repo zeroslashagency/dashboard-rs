@@ -90,7 +90,7 @@ async function computeMachineUncached(dataLayer, id, win) {
 
   const ovr = {
     feed: timeWeightedAvg(fd, win), rapid: timeWeightedAvg(rv, win), spindle: timeWeightedAvg(sv, win),
-    feedOff: fractionOff(fd, win), spindleOff: fractionOff(sv, win),
+    feedOff: fractionOff(fd, win), rapidOff: fractionOff(rv, win), spindleOff: fractionOff(sv, win),
   };
 
   // e-stop asserts — uses the SAME predicate as the downtime attribution below
@@ -110,26 +110,23 @@ async function computeMachineUncached(dataLayer, id, win) {
   const qualityProxy = parts > 0 ? Math.max(0, 100 - (pauseSegs.length / parts) * 100) : null;
 
   // downtime reasons: dwell of non-run states, bucketed by cause.
-  const downtime = downtimeByReason(segs, aalarms, estop, win);
+  const alarmSpans = activeSpans(aalarms, alarmActive, win);
+  const estopSpans = activeSpans(estop, isEstopActive, win);
+  const downtime = downtimeByReason(segs, alarmSpans, estopSpans);
 
   return {
     buckets, availability, utilization, performance, oee,
     parts, partRateRun, partRateWall, cstats, cycles, ovr,
-    estopEvents, alarmEvents, qualityProxy, segs, downtime, spanMs,
+    ovrSeries: { fd, rv, sv },
+    estopEvents, alarmEvents, estopSpans, alarmSpans, qualityProxy, segs, downtime, spanMs,
   };
 }
 
 /* Classify non-running dwell into reason buckets for the Pareto. A pause/idle
  * segment overlapping an active alarm is attributed to ALARM; an estop window
  * to E-STOP; otherwise FEED-HOLD (pause states) or IDLE (stopped/ready). */
-function downtimeByReason(segs, aalarms, estop, win) {
+function downtimeByReason(segs, alarmSpans, estopSpans) {
   const reasons = { ALARM: 0, "E-STOP": 0, "FEED-HOLD": 0, IDLE: 0, OTHER: 0 };
-  const alarmActive = (v) => {
-    const s = String(v || "").trim().toUpperCase();
-    return s && !["NO ACTIVE ALARMS", "NONE", "OK", ""].includes(s);
-  };
-  const alarmSpans = activeSpans(aalarms, alarmActive, win);
-  const estopSpans = activeSpans(estop, isEstopActive, win);
 
   for (const s of segs) {
     const b = bucketOfState(s.state);

@@ -26,7 +26,6 @@
     { id: "timeline", label: "Timeline" },
     { id: "kpi", label: "KPI" },
     { id: "analytics", label: "Analytics" },
-    { id: "threed", label: "3D" },
     { id: "maintenance", label: "Maint" },
     { id: "statistics", label: "Stats" },
   ];
@@ -562,10 +561,17 @@
 
   // ------------------------------------------------------------------ playlist
 
+  function isKnownView(id) {
+    for (var i = 0; i < ROTATION_VIEWS.length; i++) {
+      if (ROTATION_VIEWS[i].id === id) return true;
+    }
+    return false;
+  }
+
   function activePlaylistViews() {
     var list = [];
     (cfg.playlist || []).forEach(function (step) {
-      if (step && step.view && list.indexOf(step.view) === -1) list.push(step.view);
+      if (step && step.view && isKnownView(step.view) && list.indexOf(step.view) === -1) list.push(step.view);
     });
     return list.length ? list : ["cards"];
   }
@@ -577,7 +583,7 @@
 
     (cfg.playlist || []).forEach(function (spec) {
       var v = spec && spec.view;
-      if (!v) return;
+      if (!v || !isKnownView(v)) return;
       var dwell = parseSeconds(spec.dwell);
       if (dwell === null) dwell = fallbackDwell;
 

@@ -36,7 +36,7 @@
   const MAX_CELLS = 6500;    // perf ceiling on dot count (pitch grows to respect it)
   const FPS_CAP = 45;
   const FRAME_MS = 1000 / FPS_CAP;
-  const HEAVY_TABS = new Set(["threed", "timeline", "datalab"]);
+  const HEAVY_TABS = new Set(["timeline"]);
 
   const TAU = Math.PI * 2;
   const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
