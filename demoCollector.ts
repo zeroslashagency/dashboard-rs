@@ -977,7 +977,10 @@ class DemoCollector {
   }
 
   public getTimelineBulk(fromMs: number, toMs: number) {
-    const spanMs = Math.max(60_000, toMs - fromMs);
+    const nowMs = Date.now();
+    const clampedTo = Math.min(toMs, nowMs);
+    const spanMs = Math.max(60_000, clampedTo - fromMs);
+
     const lanes = this.machines.map((m) => {
       if (!m.online) {
         return {
@@ -988,7 +991,7 @@ class DemoCollector {
           bands: [
             {
               t0: Math.round(fromMs * US_PER_MS),
-              t1: Math.round(toMs * US_PER_MS),
+              t1: Math.round(clampedTo * US_PER_MS),
               status: "offline",
             },
           ],
@@ -996,8 +999,26 @@ class DemoCollector {
       }
 
       const cycleS = m.cycle_total_s ?? 1400;
-      const cycleMs = cycleS * 1000;
-      const seed = hashSeed(`${m.machine_id}|timeline`);
+      const cycleMs = Math.max(120_000, cycleS * 1000);
+      const seed = hashSeed(`${m.machine_id}|timeline_v2`);
+      const avgGapMs = Math.max(
+        90_000,
+        Math.round(cycleMs * ((1 - Math.min(0.92, Math.max(0.45, m.running_ratio))) / Math.max(0.25, m.running_ratio))),
+      );
+      const slotMs = cycleMs + avgGapMs;
+      const phaseOffset = Math.round(deterministicUnit(seed + 7) * slotMs * 0.75);
+
+      const firstSlot = Math.floor((fromMs - phaseOffset) / slotMs);
+      const lastSlot = Math.floor((clampedTo - phaseOffset) / slotMs);
+      const MAX_SLOTS = 240;
+      const startSlot = Math.max(firstSlot, lastSlot - MAX_SLOTS + 1);
+      const truncated = startSlot > firstSlot;
+
+      const progPool = [
+        m.active_program,
+        ...(m.prev_programs || []).filter((p) => p && p !== m.active_program),
+      ];
+
       const parts: Array<{
         t0: number;
         t1: number;
@@ -1005,7 +1026,7 @@ class DemoCollector {
         target_s: number;
         partial: boolean;
         program: string;
-        job: string;
+        job: number;
         group_id: number;
         baseline_s: number;
         baseline_n: number;
@@ -1013,52 +1034,123 @@ class DemoCollector {
       }> = [];
       const bands: Array<{ t0: number; t1: number; status: string }> = [];
 
-      let cursor = fromMs;
-      let idx = 0;
-      while (cursor < toMs - 30_000 && parts.length < 48) {
-        const r = deterministicUnit(seed + idx * 17);
-        const durFactor = 0.94 + r * 0.14;
-        const durMs = Math.round(cycleMs * durFactor);
-        const end = Math.min(toMs, cursor + durMs);
-        const partial = end >= toMs && end - cursor < durMs * 0.92;
-        const prog =
-          idx < 2 && m.prev_programs.length > 1
-            ? m.prev_programs[0]
-            : m.active_program;
-        const groupId = prog === m.active_program ? 2 : 1;
+      // Track sequential job counters per contiguous program group
+      let lastGroupId = -1;
+      let jobInGroup = 0;
 
-        parts.push({
-          t0: Math.round(cursor * US_PER_MS),
-          t1: Math.round(end * US_PER_MS),
-          dur_ms: Math.round(end - cursor),
-          target_s: cycleS,
-          partial,
-          program: prog,
-          job: prog.replace(/\.nc$/i, ""),
-          group_id: groupId,
-          baseline_s: cycleS,
-          baseline_n: 12,
-          dev: Number(((end - cursor) / 1000 / cycleS).toFixed(3)),
-        });
+      // If truncated at the left edge, fill leading band cleanly
+      const firstSlotStart = phaseOffset + startSlot * slotMs;
+      if (firstSlotStart > fromMs) {
         bands.push({
-          t0: Math.round(cursor * US_PER_MS),
-          t1: Math.round(end * US_PER_MS),
-          status: "running",
+          t0: Math.round(fromMs * US_PER_MS),
+          t1: Math.round(Math.min(clampedTo, firstSlotStart) * US_PER_MS),
+          status: "idle",
         });
+      }
 
-        const gapMs = Math.round(
-          (1 - m.running_ratio) * cycleMs * (0.5 + deterministicUnit(seed + idx * 31)),
-        );
-        const nextCursor = Math.min(toMs, end + Math.max(45_000, gapMs));
-        if (nextCursor > end) {
+      for (let slot = startSlot; slot <= lastSlot; slot++) {
+        const slotStart = phaseOffset + slot * slotMs;
+        const slotEnd = slotStart + slotMs;
+        if (slotEnd <= fromMs || slotStart >= clampedTo) continue;
+
+        const r1 = deterministicUnit(seed + slot * 19 + 3);
+        const r2 = deterministicUnit(seed + slot * 37 + 11);
+        const r3 = deterministicUnit(seed + slot * 53 + 29);
+
+        // Occasional extended idle/alarm outage slot (~6% of slots)
+        const isExtendedStop = r3 > 0.94 && slot < lastSlot;
+        if (isExtendedStop) {
+          const st0 = Math.max(fromMs, slotStart);
+          const st1 = Math.min(clampedTo, slotEnd);
+          if (st1 > st0) {
+            bands.push({
+              t0: Math.round(st0 * US_PER_MS),
+              t1: Math.round(st1 * US_PER_MS),
+              status: r2 > 0.55 ? "alarm" : "idle",
+            });
+          }
+          continue;
+        }
+
+        // Realistic cycle duration variation around learned baseline:
+        // ~72% normal (±12%), ~11% mild slow (+17–27%), ~8% overrun (+32–48%), ~9% short (-18–32%)
+        let durFactor: number;
+        if (r1 < 0.72) durFactor = 0.89 + (r1 / 0.72) * 0.22;
+        else if (r1 < 0.83) durFactor = 1.17 + ((r1 - 0.72) / 0.11) * 0.10;
+        else if (r1 < 0.91) durFactor = 1.32 + ((r1 - 0.83) / 0.08) * 0.16;
+        else durFactor = 0.68 + ((r1 - 0.91) / 0.09) * 0.14;
+
+        // Keep bar strictly inside slot with guaranteed breathing gap
+        const maxBarMs = Math.max(60_000, slotMs - Math.min(90_000, avgGapMs * 0.45));
+        const rawDurMs = Math.min(maxBarMs, Math.round(cycleMs * durFactor));
+        const pStart = slotStart;
+        const pEnd = pStart + rawDurMs;
+
+        // Contiguous program group (5-8 slots per run)
+        const groupId = Math.floor(slot / 6) + 1000;
+        const progIdx =
+          slot >= lastSlot - 5
+            ? 0
+            : Math.abs(Math.floor(slot / 6)) % progPool.length;
+        const prog = progPool[progIdx] || m.active_program;
+
+        if (groupId !== lastGroupId) {
+          lastGroupId = groupId;
+          jobInGroup = 1;
+        } else {
+          jobInGroup += 1;
+        }
+
+        // Skip the very latest in-progress part if it overlaps the live edge (overview draws it)
+        const isLiveEdge = pEnd >= nowMs - 5000 && pStart <= nowMs;
+        if (!isLiveEdge) {
+          const clippedStart = Math.max(fromMs, pStart);
+          const clippedEnd = Math.min(clampedTo, pEnd);
+          if (clippedEnd > clippedStart + 5000) {
+            const partial = clippedEnd < pEnd - 5000 || clippedStart > pStart + 5000;
+            parts.push({
+              t0: Math.round(clippedStart * US_PER_MS),
+              t1: Math.round(clippedEnd * US_PER_MS),
+              dur_ms: Math.round(clippedEnd - clippedStart),
+              target_s: cycleS,
+              partial,
+              program: prog,
+              job: jobInGroup,
+              group_id: groupId,
+              baseline_s: cycleS,
+              baseline_n: 14,
+              dev: Number((rawDurMs / 1000 / cycleS).toFixed(3)),
+            });
+            bands.push({
+              t0: Math.round(clippedStart * US_PER_MS),
+              t1: Math.round(clippedEnd * US_PER_MS),
+              status: "running",
+            });
+          }
+        } else {
+          // Live active edge band
+          const liveStart = Math.max(fromMs, pStart);
+          if (clampedTo > liveStart) {
+            bands.push({
+              t0: Math.round(liveStart * US_PER_MS),
+              t1: Math.round(clampedTo * US_PER_MS),
+              status: m.status === "running" ? "running" : m.status,
+            });
+          }
+        }
+
+        // Inter-cycle gap band (idle / paused / alarm)
+        const gapStart = Math.max(fromMs, pEnd);
+        const gapEnd = Math.min(clampedTo, slotEnd);
+        if (gapEnd > gapStart + 5000) {
+          const gapStatus =
+            r2 > 0.88 ? "alarm" : r2 > 0.66 ? "paused" : "idle";
           bands.push({
-            t0: Math.round(end * US_PER_MS),
-            t1: Math.round(nextCursor * US_PER_MS),
-            status: idx % 5 === 2 ? "paused" : "idle",
+            t0: Math.round(gapStart * US_PER_MS),
+            t1: Math.round(gapEnd * US_PER_MS),
+            status: gapStatus,
           });
         }
-        cursor = nextCursor;
-        idx += 1;
       }
 
       // Group parts by group_id
@@ -1079,6 +1171,7 @@ class DemoCollector {
             baseline_n: p.baseline_n,
           });
         } else {
+          existing.t0 = Math.min(existing.t0, p.t0);
           existing.t1 = Math.max(existing.t1, p.t1);
           existing.count += 1;
         }
@@ -1087,28 +1180,28 @@ class DemoCollector {
       if (bands.length === 0) {
         bands.push({
           t0: Math.round(fromMs * US_PER_MS),
-          t1: Math.round(toMs * US_PER_MS),
+          t1: Math.round(clampedTo * US_PER_MS),
           status: m.status,
         });
       }
 
-      // Ensure tail reflects current live status for short windows
-      if (spanMs <= 2 * 3600_000 && bands.length > 0) {
+      // Ensure right tail reflects current live status for short windows
+      if (spanMs <= 2 * 3600_000 && bands.length > 0 && Math.abs(clampedTo - nowMs) < 90_000) {
         bands[bands.length - 1].status = m.status;
       }
 
       return {
         machine: m.machine_id,
-        truncated: false,
+        truncated,
         parts,
-        groups: [...groupMap.values()],
-        bands,
+        groups: [...groupMap.values()].sort((a, b) => a.t0 - b.t0),
+        bands: bands.sort((a, b) => a.t0 - b.t0),
       };
     });
 
     return {
       from: Math.round(fromMs * US_PER_MS),
-      to: Math.round(toMs * US_PER_MS),
+      to: Math.round(clampedTo * US_PER_MS),
       lanes,
     };
   }
@@ -1129,13 +1222,25 @@ class DemoCollector {
               ? m.overrides.spindle ?? 100
               : 100;
     const spread = item === "sspeed" ? 45 : 4;
+    const seed = hashSeed(`${machineId}|${item}`);
+    const cycleS = m.cycle_total_s ?? 1400;
+    const slotMs = Math.max(180_000, cycleS * 1000 * 1.25);
     const buckets = [];
     for (let i = 0; i < count; i++) {
       const tMs = fromMs + i * step;
-      const avg = Number((baseVal + Math.sin(i * 0.35) * spread).toFixed(2));
+      const slotPhase = ((tMs + (seed % 90000)) % slotMs) / slotMs;
+      const inGap = slotPhase > 0.80;
+      let avg: number;
+      if (item === "sspeed") {
+        avg = inGap ? 0 : Number(Math.max(0, baseVal + Math.sin(tMs / 18000) * spread * 2.4).toFixed(1));
+      } else if (item === "fdovrd") {
+        avg = inGap ? 0 : Number((slotPhase > 0.52 && slotPhase < 0.62 ? Math.max(70, baseVal - 15) : baseVal).toFixed(1));
+      } else {
+        avg = Number((baseVal + Math.sin(tMs / 24000) * spread).toFixed(2));
+      }
       buckets.push({
         t: Math.round(tMs * US_PER_MS),
-        min: Number((avg - spread * 0.6).toFixed(2)),
+        min: Number(Math.max(0, avg - spread * 0.6).toFixed(2)),
         max: Number((avg + spread * 0.6).toFixed(2)),
         avg,
         n: 12,
@@ -1145,52 +1250,50 @@ class DemoCollector {
   }
 
   public getEvents(fromMs: number, toMs: number) {
-    const span = Math.max(60_000, toMs - fromMs);
-    const events = [
-      {
-        machine: "VMC-08",
-        ts: Math.round(toMs - span * 0.08),
-        sev: "WARNING",
-        rule: "override",
-        msg: "Feed override dialed to 90% during finish pass (HSG_402_FINISH_OP2.NC)",
-      },
-      {
-        machine: "VMC-06",
-        ts: Math.round(toMs - span * 0.16),
-        sev: "INFO",
-        rule: "program",
-        msg: "Program loaded → LH141_M12ANDFINALOPV1.nc",
-      },
-      {
-        machine: "VMC-02",
-        ts: Math.round(toMs - span * 0.28),
-        sev: "WARNING",
-        rule: "feed_hold",
-        msg: "Operator feed-hold during tool inspection (MET_358_1OP.NC)",
-      },
-      {
-        machine: "VMC-07",
-        ts: Math.round(toMs - span * 0.41),
-        sev: "INFO",
-        rule: "program",
-        msg: "Program loaded → LH_028_1ST_OP.NC",
-      },
-      {
-        machine: "VMC-01",
-        ts: Math.round(toMs - span * 0.55),
-        sev: "INFO",
-        rule: "program",
-        msg: "Program loaded → BRK_210_ROUGH_OP1.NC",
-      },
-      {
-        machine: "VMC-04",
-        ts: Math.round(toMs - span * 0.72),
-        sev: "CRITICAL",
-        rule: "offline",
-        msg: "MTConnect agent unreachable — machine offline",
-      },
-    ].filter((e) => e.ts >= fromMs && e.ts <= toMs);
+    const nowMs = Date.now();
+    const clampedTo = Math.min(toMs, nowMs);
+    const events: Array<{ machine: string; ts: number; sev: string; rule: string; msg: string }> = [];
+    const STEP_MS = 42 * 60_000; // deterministic 42-minute cadence across fleet
+    const firstSlot = Math.floor(fromMs / STEP_MS);
+    const lastSlot = Math.floor(clampedTo / STEP_MS);
+    const startSlot = Math.max(firstSlot, lastSlot - 90);
 
+    const templates = [
+      { sev: "WARNING", rule: "override", msg: (m: LiveMachine) => `Feed override dialed to 85% during finish pass (${m.active_program})` },
+      { sev: "INFO", rule: "program", msg: (m: LiveMachine) => `Program loaded → ${m.active_program}` },
+      { sev: "WARNING", rule: "feed_hold", msg: (m: LiveMachine) => `Operator feed-hold during tool inspection (${m.active_program})` },
+      { sev: "CRITICAL", rule: "estop", msg: (m: LiveMachine) => `E-Stop triggered during tool change (${m.tool_id})` },
+    ];
+
+    for (let slot = startSlot; slot <= lastSlot; slot++) {
+      const mIdx = Math.abs(slot * 5 + 1) % this.machines.length;
+      const m = this.machines[mIdx];
+      const u = deterministicUnit(slot * 71 + mIdx * 13);
+      const ts = Math.round(slot * STEP_MS + u * STEP_MS * 0.72);
+      if (ts < fromMs || ts > clampedTo) continue;
+      if (!m.online) {
+        if (slot % 3 === 0) {
+          events.push({
+            machine: m.machine_id,
+            ts,
+            sev: "CRITICAL",
+            rule: "offline",
+            msg: "MTConnect agent unreachable — machine offline",
+          });
+        }
+        continue;
+      }
+      const tpl = templates[Math.floor(deterministicUnit(slot * 29 + 7) * templates.length)];
+      events.push({
+        machine: m.machine_id,
+        ts,
+        sev: tpl.sev,
+        rule: tpl.rule,
+        msg: tpl.msg(m),
+      });
+    }
+
+    events.sort((a, b) => b.ts - a.ts);
     return { events };
   }
 

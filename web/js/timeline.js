@@ -1,269 +1,527 @@
-/* VMC God-mode — Production Timeline.
+/* VMC Production Timeline — High-Speed 8-Machine Studio Schedule.
  *
- * One horizontal lane per machine on a real TIME axis. Completed parts are
- * reconstructed from the `cyremtim` (cycle-remaining) signal — it counts down
- * within a part and jumps back up at each new cycle, so a part is a maximal
- * countdown run; its width on the axis is its real wall-clock duration. Each
- * segment is colored against the `tcycle` target (green on/under, amber close,
- * red overrun). The right edge is the LIVE in-progress part, polled at 1 Hz
- * from /api/overview and growing in real time.
- *
- * Range (Hour / Day / Week / Month) + scroll ◀ ▶ drive the [from,to] window,
- * served by /api/history_range (real rows the whole way back — not the recent
- * 5000-row cap). All real signals. No fake, no padded ranges.
+ * Dual-theme (Light & Dark) matching Fleet Intelligence, fitting all 8 VMC
+ * lanes cleanly on one screen with:
+ *   - Live right-aligned framing (92% real history + 8% live breathing edge)
+ *   - Dirty-flagged ResizeObserver canvas rendering (zero mousemove redraws)
+ *   - Synchronized vertical crosshair across all 8 lanes + floating ruler chip
+ *   - Clickable idle/hold/alarm/offline gaps with direct Fleet Intelligence
+ *     downtime cause logging (/api/fleet/downtime)
+ *   - Click-to-expand inline Spindle Speed (RPM) & Feed Override (%) trace
+ *   - Shift presets (1h | 4h | Shift | 24h | 7d | 30d) & IST shift handovers
+ *   - Event pins (Alarm/E-Stop, Feed-Hold/Override, Program) on every lane
+ *   - Explicit zoom controls (- / + / Fit) & interactive overview minimap
  */
 
-const RANGES = [
-  { key: "hour", label: "Hour", ms: 3600e3 },
-  { key: "day", label: "Day", ms: 86400e3 },
-  { key: "week", label: "Week", ms: 7 * 86400e3 },
-  { key: "month", label: "Month", ms: 30 * 86400e3 },
+import { fleetStore } from "./fleetStoreClient.js";
+import { DOWNTIME_REASONS } from "./fleetCore.js";
+import {
+  IST_OFFSET_MS,
+  NORMAL_DEV,
+  WIDE_DEV,
+  computeCurrentIstShift,
+  computeIstDayBoundaries,
+  computeShiftBoundaries,
+  computeMinimapBins,
+  extractLaneGaps,
+  fmtClockIST,
+  fmtClockSecIST,
+  fmtDayIST,
+  fmtDurCompact,
+  fmtIsoDateIST,
+  partDeviationKind,
+  shiftLabelForTs,
+  summarizeFleetWindow,
+  summarizeLaneWindow,
+} from "./timelineCore.js";
+
+const PRESETS = [
+  { key: "1h", label: "1h", ms: 3600e3 },
+  { key: "4h", label: "4h", ms: 4 * 3600e3 },
+  { key: "shift", label: "Shift", ms: 8 * 3600e3, isShift: true },
+  { key: "24h", label: "24h", ms: 24 * 3600e3 },
+  { key: "7d", label: "7d", ms: 7 * 86400e3 },
+  { key: "30d", label: "30d", ms: 30 * 86400e3 },
 ];
-const RANGE_MS = Object.fromEntries(RANGES.map((r) => [r.key, r.ms]));
+const PRESET_MAP = Object.fromEntries(PRESETS.map((p) => [p.key, p]));
+const LEGACY_RANGE_MAP = { hour: "1h", day: "24h", week: "7d", month: "30d" };
 
-// per-machine identity tint (shared visual language with the 3D theatre)
-const MPAL = [
-  "#39d9f2", "#fb9e1a", "#8cd972", "#dc73f2", "#f5c740", "#739ef9",
-];
+const MIN_SPAN = 10 * 60e3;       // 10 minutes
+const MAX_SPAN = 45 * 86400e3;    // 45 days
+const RIGHT_PAD_FRAC = 0.08;      // 92% real history + 8% live breathing edge
 
-const LS_RANGE = "vmc_tl_range";
-const LS_FILTER = "vmc_tl_machines";   // selected machine ids (JSON array); absent = all
-const LS_SNAP = "vmc_tl_snap_v1";      // device-persisted timeline snapshot (instant boot paint)
-const SNAP_MAX_BYTES = 4_000_000;      // skip persisting snapshots bigger than ~4MB (quota safety)
+const LS_RANGE = "vmc_tl_range_v2";
+const LS_FILTER = "vmc_tl_machines";
+const LS_SNAP = "vmc_tl_snap_v2";
+const SNAP_MAX_BYTES = 3_500_000;
 
-// All wall-clock rendering is in Indian Standard Time (Asia/Kolkata, UTC+5:30) —
-// the shop floor is in India, so every label/axis tick reads in local plant time.
-// Epoch ms stay absolute; this only changes how they're displayed.
-const IST_TZ = "Asia/Kolkata";
-const IST_OFFSET = 330 * 60e3;         // +5:30 in ms (for snapping a day boundary)
-// midnight (00:00 IST) of the calendar day that `ms` falls in, as absolute ms
-function istDayStart(ms) {
-  return Math.floor((ms + IST_OFFSET) / 86400e3) * 86400e3 - IST_OFFSET;
+const escHtml = (s) =>
+  String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[c]));
+
+function isLightTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light";
 }
 
-// Machine filter persistence. null = "all machines" (default); otherwise a Set
-// of selected machine ids. Stored as a JSON array; absent key means all.
 function loadSel() {
   try {
     const raw = localStorage.getItem(LS_FILTER);
     if (!raw) return null;
     const arr = JSON.parse(raw);
     return Array.isArray(arr) && arr.length ? new Set(arr) : null;
-  } catch (_) { return null; }
-}
-function saveSel(set) {
-  if (!set || !set.size) localStorage.removeItem(LS_FILTER);
-  else localStorage.setItem(LS_FILTER, JSON.stringify([...set]));
+  } catch {
+    return null;
+  }
 }
 
-// ---- device-persisted snapshot: store the last good timeline on the device so
-// a full page reload paints INSTANTLY from localStorage, then refreshes in the
-// background. This is what makes a cold Cmd+R feel cached instead of a 5s load.
+function saveSel(set) {
+  try {
+    if (!set || !set.size) localStorage.removeItem(LS_FILTER);
+    else localStorage.setItem(LS_FILTER, JSON.stringify([...set]));
+  } catch {}
+}
+
 function loadSnapshot() {
   try {
     const raw = localStorage.getItem(LS_SNAP);
     if (!raw) return null;
     const snap = JSON.parse(raw);
-    // a snapshot older than 12h is stale enough that we'd rather show fresh data
-    if (!snap || !snap.machines || (Date.now() - snap.savedAt) > 12 * 3600e3) return null;
+    if (!snap || !Array.isArray(snap.machines) || Date.now() - snap.savedAt > 12 * 3600e3) return null;
     return snap;
-  } catch (_) { return null; }
+  } catch {
+    return null;
+  }
 }
+
 function saveSnapshot(snap) {
   try {
     const json = JSON.stringify(snap);
-    if (json.length > SNAP_MAX_BYTES) return;   // too big for the device quota — skip
+    if (json.length > SNAP_MAX_BYTES) return;
     localStorage.setItem(LS_SNAP, json);
-  } catch (_) { /* quota / private mode — non-fatal, just no persistence */ }
+  } catch {}
 }
 
-// theme probe — canvas colors can't read CSS vars, so gate the few hand-picked
-// tints on the active theme. Light mode needs darker text/lines to stay legible.
-function isLight() {
-  return document.documentElement.getAttribute("data-theme") === "light";
+function statusLabel(st) {
+  const s = String(st || "").toLowerCase();
+  if (s === "running") return "Cutting";
+  if (s === "paused") return "Feed-Hold";
+  if (s === "alarm") return "Alarm";
+  if (s === "offline") return "Offline";
+  return "Idle";
 }
 
-// Deviation bands vs a program's LEARNED baseline (median cycle time).
-// A part is "normal" within ±NORMAL of its baseline, "mild" out to WIDE,
-// else flagged. Both directions matter: slow (high) and short/aborted (low).
-const NORMAL = 0.15;   // ±15% = normal spread
-const WIDE = 0.30;     // ±15–30% = mild (amber); beyond = flagged (red/blue)
+function progHue(name) {
+  if (!name) return 220;
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return h;
+}
 
-const pad2 = (n) => String(n).padStart(2, "0");
-function clock(ms) {
-  return new Date(ms).toLocaleTimeString("en-GB",
-    { timeZone: IST_TZ, hour: "2-digit", minute: "2-digit", hour12: false });
-}
-function clockS(ms) {
-  return new Date(ms).toLocaleTimeString("en-GB",
-    { timeZone: IST_TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-}
-function dur(ms) {
-  const s = Math.round(ms / 1000), m = Math.floor(s / 60);
-  if (m >= 60) { const h = Math.floor(m / 60); return `${h}h ${m % 60}m`; }
-  return m > 0 ? `${m}m ${pad2(s % 60)}s` : `${s}s`;
-}
-function dayLabel(ms) {
-  return new Date(ms).toLocaleDateString("en-US",
-    { timeZone: IST_TZ, weekday: "short", month: "short", day: "numeric" });
+function roundRect(g, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  g.beginPath();
+  g.moveTo(x + rr, y);
+  g.arcTo(x + w, y, x + w, y + h, rr);
+  g.arcTo(x + w, y + h, x, y + h, rr);
+  g.arcTo(x, y + h, x, y, rr);
+  g.arcTo(x, y, x + w, y, rr);
+  g.closePath();
 }
 
 export function mountTimeline(body, dataLayer) {
-  const initRange = localStorage.getItem(LS_RANGE) || "hour";
+  const savedRaw = localStorage.getItem(LS_RANGE) || localStorage.getItem("vmc_tl_range") || "4h";
+  const initKey = PRESET_MAP[savedRaw] ? savedRaw : (LEGACY_RANGE_MAP[savedRaw] || "4h");
+  const initPreset = PRESET_MAP[initKey] || PRESET_MAP["4h"];
+
   body.innerHTML = `
-    <div class="tl-wrap">
-      <div class="tl-controls">
-        <div class="tl-ranges" data-f="ranges"></div>
-        <div class="tl-nav">
-          <button type="button" class="tl-btn" data-f="prev" title="Scroll back">◀</button>
-          <button type="button" class="tl-btn" data-f="now" title="Jump to live">Now</button>
-          <button type="button" class="tl-btn" data-f="next" title="Scroll forward">▶</button>
-          <label class="tl-btn tl-datebtn" title="Jump to a date">
-            <span class="tl-date-ico">📅</span>
-            <input type="date" class="tl-date-input" data-f="datePick" />
-          </label>
+    <div class="tl2-root" data-f="root">
+      <section class="tl2-kpi-strip" data-f="kpiStrip">
+        <div class="tl2-kpi">
+          <div class="tl2-kpi-main">
+            <span class="tl2-kpi-k">Fleet Cutting Utilization</span>
+            <span class="tl2-kpi-v" data-f="kpiUtil">—</span>
+            <span class="tl2-kpi-sub" data-f="kpiUtilSub">Loading machines…</span>
+          </div>
+          <div class="tl2-kpi-bar"><span data-f="kpiUtilBar" style="width:0%"></span></div>
         </div>
-        <div class="tl-window" data-f="winlabel">—</div>
-        <span class="tl-loading" data-f="loading" hidden><i class="tl-spin"></i>loading older…</span>
-        <div class="tl-filter" data-f="filterWrap">
-          <button type="button" class="tl-btn tl-filter-btn" data-f="filterBtn" aria-haspopup="true" aria-expanded="false">
-            <span data-f="filterLabel">All machines</span><span class="tl-filter-caret">▾</span>
-          </button>
-          <div class="tl-filter-menu" data-f="filterMenu" hidden></div>
+        <div class="tl2-kpi">
+          <div class="tl2-kpi-main">
+            <span class="tl2-kpi-k">Parts in Window</span>
+            <span class="tl2-kpi-v" data-f="kpiParts">—</span>
+            <span class="tl2-kpi-sub" data-f="kpiPartsSub">—</span>
+          </div>
         </div>
-        <div class="tl-legend">
-          <span><i class="tl-sw on"></i>normal</span>
-          <span><i class="tl-sw near"></i>slow +15%</span>
-          <span><i class="tl-sw over"></i>slow +30%</span>
-          <span><i class="tl-sw low"></i>short</span>
-          <span><i class="tl-sw live"></i>live</span>
+        <div class="tl2-kpi">
+          <div class="tl2-kpi-main">
+            <span class="tl2-kpi-k">Non-Cutting Loss</span>
+            <span class="tl2-kpi-v" data-f="kpiLoss">—</span>
+            <span class="tl2-kpi-sub" data-f="kpiLossSub">Idle · Feed-Hold · Alarm</span>
+          </div>
         </div>
+        <div class="tl2-kpi">
+          <div class="tl2-kpi-main">
+            <span class="tl2-kpi-k">Incidents &amp; Logged Gaps</span>
+            <span class="tl2-kpi-v" data-f="kpiInc">—</span>
+            <span class="tl2-kpi-sub" data-f="kpiIncSub">Click any gap to log cause</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="tl2-board" data-f="board">
+        <div class="tl2-toolbar">
+          <div class="tl2-tb-left">
+            <div class="tl2-seg" data-f="presets"></div>
+            <button type="button" class="tl2-btn tl2-btn-icon" data-f="prev" title="Scroll back">◀</button>
+            <button type="button" class="tl2-btn is-live" data-f="now" title="Jump to live edge">Now</button>
+            <button type="button" class="tl2-btn tl2-btn-icon" data-f="next" title="Scroll forward">▶</button>
+            <button type="button" class="tl2-btn tl2-btn-icon" data-f="zoomOut" title="Zoom out">−</button>
+            <button type="button" class="tl2-btn tl2-btn-icon" data-f="zoomIn" title="Zoom in">+</button>
+            <button type="button" class="tl2-btn" data-f="fitShift" title="Fit current IST shift">Fit Shift</button>
+            <label class="tl2-btn tl2-datebtn" title="Jump to date">
+              <span>Date</span>
+              <input type="date" class="tl2-date-input" data-f="datePick" />
+            </label>
+          </div>
+          <div class="tl2-tb-right">
+            <span class="tl2-loading" data-f="loading" hidden><i class="tl2-spin"></i>syncing…</span>
+            <span class="tl2-win-readout is-live" data-f="winLabel">—</span>
+            <div class="tl2-filter" data-f="filterWrap">
+              <button type="button" class="tl2-btn" data-f="filterBtn" aria-haspopup="true" aria-expanded="false">
+                <span data-f="filterLabel">All machines</span><span>▾</span>
+              </button>
+              <div class="tl2-filter-menu" data-f="filterMenu" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tl2-legend-bar">
+          <div class="tl2-legend-group">
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-normal"></i>Normal cycle</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-high"></i>Slow +15%</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-over"></i>Over +30%</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-low"></i>Short</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-live"></i>Live</span>
+          </div>
+          <div class="tl2-legend-group">
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-idle"></i>Idle gap</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-paused"></i>Feed-Hold</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-alarm"></i>Alarm / E-Stop</span>
+            <span class="tl2-legend-item"><i class="tl2-sw tl2-sw-offline"></i>Offline</span>
+            <span class="tl2-legend-item"><i class="tl2-pin-sw tl2-pin-crit"></i>Event pin</span>
+          </div>
+        </div>
+
+        <div class="tl2-stage" data-f="stage">
+          <div class="tl2-ruler-row">
+            <div class="tl2-ruler-gutter">
+              <span>Machine</span>
+              <span>Cut %</span>
+            </div>
+            <div class="tl2-ruler-track" data-f="rulerTrack">
+              <canvas class="tl2-axis" data-f="axis"></canvas>
+              <div class="tl2-xhair-time" data-f="xhairTime" hidden>—</div>
+            </div>
+          </div>
+
+          <div class="tl2-lanes-wrap" data-f="lanesWrap">
+            <div class="tl2-xhair-line" data-f="xhairLine" hidden></div>
+            <div data-f="lanesHost"></div>
+          </div>
+
+          <div class="tl2-minimap-row">
+            <div class="tl2-minimap-gutter">
+              <span>Fleet Overview</span>
+              <span data-f="minimapSpan">—</span>
+            </div>
+            <div class="tl2-minimap-track" data-f="minimapTrack">
+              <canvas class="tl2-minimap-canvas" data-f="minimapCanvas"></canvas>
+              <div class="tl2-brush" data-f="brush" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tl2-status-note" data-f="note" role="status" aria-live="polite">Loading 8-machine production timeline…</div>
+      </section>
+
+      <div class="tl2-callout" data-f="callout" hidden></div>
+
+      <div class="tl2-drawer-backdrop" data-f="drawerBackdrop" hidden>
+        <aside class="tl2-drawer" data-f="drawer" role="dialog" aria-modal="true">
+          <div class="tl2-drawer-head">
+            <div>
+              <h3 class="tl2-drawer-title" data-f="drawerTitle">Details</h3>
+              <div class="tl2-drawer-sub" data-f="drawerSub"></div>
+            </div>
+            <button type="button" class="tl2-btn tl2-btn-icon" data-f="drawerClose" title="Close">×</button>
+          </div>
+          <div class="tl2-drawer-body" data-f="drawerBody"></div>
+        </aside>
       </div>
-      <div class="tl-grid" data-f="grid">
-        <div class="tl-gutter"></div>
-        <canvas class="tl-axis" data-f="axis"></canvas>
-      </div>
-      <p class="ds-note" data-f="note" role="status" aria-live="polite">Loading timeline…</p>
-      <div class="tl-tip" data-f="tip" hidden></div>
-    </div>`;
+    </div>
+  `;
 
   const refs = {};
-  body.querySelectorAll("[data-f]").forEach((n) => { refs[n.dataset.f] = n; });
+  body.querySelectorAll("[data-f]").forEach((el) => {
+    refs[el.dataset.f] = el;
+  });
 
   const ctx = {
-    rangeKey: RANGE_MS[initRange] ? initRange : "hour",
-    spanMs: RANGE_MS[RANGE_MS[initRange] ? initRange : "hour"], // continuous visible span (zoomable)
-    anchor: Date.now() + RANGE_MS[RANGE_MS[initRange] ? initRange : "hour"] * 0.5, // NOW centered on load
-    live: false,             // future-anchored so the now line sits mid-window
-    machines: [],            // [{id, name}] (all reported by overview)
-    sel: loadSel(),          // Set<id> of selected machines, or null = ALL
-    wallOrder: null,       // wall presentation order (tv.js); null = payload order
-    lanes: new Map(),        // id -> { label, canvas, dot, parts:[], tcycle:[], rects:[] }
-    over: new Map(),         // id -> overview machine (live)
-    events: new Map(),       // id -> [real estop/override events] (ascending ts)
-    dataCache: new Map(),    // id -> {parts, groups, bands, truncated} — survives lane hide/show
-    bulkCache: new Map(),    // windowKey -> {ts, byMachine, evKey} — memoized fetches
-    pinned: null,            // pinned job card: { id, p } or null
+    presetKey: initPreset.key,
+    spanMs: initPreset.ms,
+    live: true,                       // LIVE right-aligned by default — eliminates empty half!
+    anchor: Date.now() + initPreset.ms * RIGHT_PAD_FRAC,
+    machines: [],
+    sel: loadSel(),
+    wallOrder: null,
+    lanes: new Map(),                 // id -> lane DOM + hit-test caches
+    expanded: new Set(),              // expanded machine IDs for Spindle + Override trace
+    seriesCache: new Map(),           // `${id}|${bucketKey}` -> { sspeed, fdovrd, at }
+    over: new Map(),                  // id -> live overview record
+    events: new Map(),                // id -> ascending events[]
+    dataCache: new Map(),             // id -> { parts, groups, bands, truncated }
+    bulkCache: new Map(),             // key -> { ts, byMachine }
+    downtimeLogs: fleetStore.getCached().downtimeLogs || [],
+    cover: { from: 0, to: 0, has: false },
+    bufLoaded: false,
     token: 0,
-    liveTimer: null,
-    raf: null,
-    dragging: false,         // calendar-style drag-to-pan in progress
+    trackW: 900,
+    laneH: 60,
+    dragging: false,
+    didPan: false,
     panStartX: 0,
-    panStartAnchor: 0,
-    buf: { from: 0, to: 0, loaded: false }, // loaded data span (wider than view)
-    cover: { from: 0, to: 0, has: false },  // contiguous span actually fetched & merged
+    panLastX: 0,
+    dirtyAxis: true,
+    dirtyLanes: true,
+    dirtyMinimap: true,
+    dirtySummary: true,
+    dirtyExpand: true,
+    rafId: null,
+    liveTimer: null,
+    destroyed: false,
+    drawerItem: null,
   };
 
-  // range buttons
-  for (const r of RANGES) {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "tl-rbtn"; b.dataset.r = r.key; b.textContent = r.label;
-    b.addEventListener("click", () => setRange(r.key));
-    refs.ranges.appendChild(b);
-  }
-  function syncRangeBtns() {
-    // highlight the preset whose span matches the current zoom; if the user has
-    // stretched to a custom span none stays lit.
-    const match = RANGES.find((r) => Math.abs(r.ms - ctx.spanMs) < r.ms * 0.02);
-    ctx.rangeKey = match ? match.key : ctx.rangeKey;
-    refs.ranges.querySelectorAll(".tl-rbtn").forEach((b) =>
-      b.classList.toggle("is-active", !!match && b.dataset.r === match.key));
+  const inflight = new Set();
+  let loadingCount = 0;
+  let bufTimer = null;
+  let zoomTimer = null;
+  let evBusy = false;
+  let evKey = "";
+  let liveBusy = false;
+  let offlinePatternDark = null;
+  let offlinePatternLight = null;
+
+  function markDirty(opts = {}) {
+    if (opts.all || opts.axis) ctx.dirtyAxis = true;
+    if (opts.all || opts.lanes) ctx.dirtyLanes = true;
+    if (opts.all || opts.minimap) ctx.dirtyMinimap = true;
+    if (opts.all || opts.summary) ctx.dirtySummary = true;
+    if (opts.all || opts.expand) ctx.dirtyExpand = true;
+    scheduleFrame();
   }
 
-  // ---- machine filter (default = all) ----
+  function scheduleFrame() {
+    if (ctx.destroyed || ctx.rafId != null) return;
+    ctx.rafId = requestAnimationFrame(() => {
+      ctx.rafId = null;
+      if (ctx.destroyed) return;
+      if (!refs.board || !refs.board.offsetParent) return;
+      renderDirty();
+    });
+  }
+
+  function showLoading(on) {
+    loadingCount = Math.max(0, loadingCount + (on ? 1 : -1));
+    if (refs.loading) refs.loading.hidden = loadingCount === 0;
+  }
+
+  function windowSpan() {
+    const span = ctx.spanMs;
+    const to = ctx.live ? Date.now() + span * RIGHT_PAD_FRAC : ctx.anchor;
+    return { from: to - span, to, span };
+  }
+
+  function maxFutureAnchor(span) {
+    return Date.now() + span * RIGHT_PAD_FRAC;
+  }
+
+  // ---- Presets ----
+  for (const p of PRESETS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tl2-seg-btn";
+    btn.dataset.p = p.key;
+    btn.textContent = p.label;
+    btn.addEventListener("click", () => applyPreset(p.key));
+    refs.presets.appendChild(btn);
+  }
+
+  function syncPresetBtns() {
+    const match = PRESETS.find((p) => !p.isShift && Math.abs(p.ms - ctx.spanMs) < p.ms * 0.025);
+    const shiftMatch = ctx.presetKey === "shift" && Math.abs(ctx.spanMs - 8 * 3600e3) < 120e3;
+    refs.presets.querySelectorAll(".tl2-seg-btn").forEach((b) => {
+      const isAct = shiftMatch ? b.dataset.p === "shift" : (!!match && b.dataset.p === match.key);
+      b.classList.toggle("is-active", isAct);
+    });
+    refs.now.classList.toggle("is-live", ctx.live);
+  }
+
+  function applyPreset(key, silent = false) {
+    const p = PRESET_MAP[key];
+    if (!p) return;
+    ctx.presetKey = p.key;
+    if (!silent) {
+      try { localStorage.setItem(LS_RANGE, p.key); } catch {}
+    }
+    if (p.isShift) {
+      const sh = computeCurrentIstShift(Date.now());
+      ctx.spanMs = sh.to - sh.from;
+      ctx.live = false;
+      ctx.anchor = sh.to;
+    } else {
+      ctx.spanMs = p.ms;
+      ctx.live = true;
+      ctx.anchor = maxFutureAnchor(ctx.spanMs);
+    }
+    ctx.cover.has = false;
+    syncPresetBtns();
+    paintWinLabel();
+    markDirty({ all: true });
+    loadBuffer(true);
+    refreshExpandedSeries();
+  }
+
+  function jumpToNow() {
+    ctx.live = true;
+    ctx.anchor = maxFutureAnchor(ctx.spanMs);
+    syncPresetBtns();
+    paintWinLabel();
+    markDirty({ all: true });
+    ensureBuffer(false);
+    refreshExpandedSeries();
+  }
+
+  function panByMs(dtMs) {
+    const span = ctx.spanMs;
+    const base = ctx.live ? maxFutureAnchor(span) : ctx.anchor;
+    const cap = maxFutureAnchor(span);
+    let next = base + dtMs;
+    if (next >= cap - 1500) {
+      ctx.live = true;
+      ctx.anchor = cap;
+    } else {
+      ctx.live = false;
+      ctx.anchor = next;
+    }
+    syncPresetBtns();
+    paintWinLabel();
+    markDirty({ all: true });
+    ensureBuffer(false);
+  }
+
+  function panByPx(dxPx) {
+    if (!ctx.trackW) return;
+    panByMs(-(dxPx / ctx.trackW) * ctx.spanMs);
+  }
+
+  function zoomBy(factor, fracX = 0.5) {
+    const oldSpan = ctx.spanMs;
+    const next = Math.max(MIN_SPAN, Math.min(MAX_SPAN, oldSpan * factor));
+    if (Math.abs(next - oldSpan) < 100) return;
+    const f = Math.max(0, Math.min(1, fracX));
+    const { from } = windowSpan();
+    const pivot = from + f * oldSpan;
+    let newTo = pivot + (1 - f) * next;
+    const cap = maxFutureAnchor(next);
+    ctx.spanMs = next;
+    ctx.presetKey = "";
+    if (newTo >= cap - 1500) {
+      ctx.live = true;
+      ctx.anchor = cap;
+    } else {
+      ctx.live = false;
+      ctx.anchor = newTo;
+    }
+    syncPresetBtns();
+    paintWinLabel();
+    markDirty({ all: true });
+    if (zoomTimer) clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(() => {
+      ensureBuffer(true);
+      refreshExpandedSeries();
+    }, 180);
+  }
+
+  function jumpToDate(yyyyMmDd) {
+    if (!yyyyMmDd) return;
+    const [y, mo, d] = yyyyMmDd.split("-").map(Number);
+    if (!y || !mo || !d) return;
+    const dayStartUtc = Date.UTC(y, mo - 1, d) - IST_OFFSET_MS;
+    const center = dayStartUtc + 12 * 3600e3;
+    const cap = maxFutureAnchor(ctx.spanMs);
+    const to = Math.min(cap, center + ctx.spanMs * 0.5);
+    ctx.live = to >= cap - 1500;
+    ctx.anchor = to;
+    ctx.cover.has = false;
+    syncPresetBtns();
+    paintWinLabel();
+    markDirty({ all: true });
+    loadBuffer(true);
+    refreshExpandedSeries();
+  }
+
+  refs.prev.addEventListener("click", () => panByMs(-ctx.spanMs * 0.45));
+  refs.next.addEventListener("click", () => panByMs(ctx.spanMs * 0.45));
+  refs.now.addEventListener("click", jumpToNow);
+  refs.zoomIn.addEventListener("click", () => zoomBy(0.62, 0.8));
+  refs.zoomOut.addEventListener("click", () => zoomBy(1.6, 0.8));
+  refs.fitShift.addEventListener("click", () => applyPreset("shift"));
+  refs.datePick.addEventListener("change", (e) => jumpToDate(e.target.value));
+
+  // ---- Machine filter ----
   const isVisible = (id) => !ctx.sel || ctx.sel.has(id);
 
   function filterLabelText() {
     if (!ctx.sel || !ctx.sel.size) return "All machines";
-    const n = ctx.machines.filter((m) => ctx.sel.has(m.id)).length;
-    if (n === ctx.machines.length) return "All machines";
-    if (n === 1) {
-      const m = ctx.machines.find((x) => ctx.sel.has(x.id));
-      return m ? m.name : "1 machine";
-    }
-    return `${n} machines`;
+    const vis = ctx.machines.filter((m) => ctx.sel.has(m.id));
+    if (vis.length === ctx.machines.length) return "All machines";
+    if (vis.length === 1) return vis[0].name;
+    return `${vis.length} machines`;
   }
 
-  // (re)build the dropdown rows from the current machine list + selection
   function buildFilterMenu() {
     const allOn = !ctx.sel || ctx.sel.size === ctx.machines.length;
     const rows = ctx.machines.map(({ id, name }) => {
       const on = isVisible(id);
-      return `<label class="tl-filter-opt"><input type="checkbox" data-mid="${escAttr(id)}" ${on ? "checked" : ""}><span>${escTip(name)}</span></label>`;
+      return `<label class="tl2-filter-opt"><input type="checkbox" data-mid="${escHtml(id)}" ${on ? "checked" : ""}><span>${escHtml(name)}</span></label>`;
     }).join("");
-    refs.filterMenu.innerHTML =
-      `<label class="tl-filter-opt tl-filter-all"><input type="checkbox" data-mid="__all__" ${allOn ? "checked" : ""}><span>All machines</span></label>
-       <div class="tl-filter-divider"></div>${rows}`;
+    refs.filterMenu.innerHTML = `
+      <label class="tl2-filter-opt"><input type="checkbox" data-mid="__all__" ${allOn ? "checked" : ""}><strong>All machines</strong></label>
+      <div class="tl2-filter-divider"></div>
+      ${rows}
+    `;
     refs.filterMenu.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.addEventListener("change", onFilterChange);
+      cb.addEventListener("change", (e) => {
+        const mid = e.target.dataset.mid;
+        if (mid === "__all__") {
+          ctx.sel = e.target.checked ? null : new Set();
+        } else {
+          const set = ctx.sel ? new Set(ctx.sel) : new Set(ctx.machines.map((m) => m.id));
+          if (e.target.checked) set.add(mid);
+          else set.delete(mid);
+          ctx.sel = set.size === ctx.machines.length ? null : set;
+        }
+        saveSel(ctx.sel);
+        buildFilterMenu();
+        syncVisibleLanes();
+      });
     });
     refs.filterLabel.textContent = filterLabelText();
-  }
-
-  function onFilterChange(e) {
-    const mid = e.target.dataset.mid;
-    if (mid === "__all__") {
-      ctx.sel = e.target.checked ? null : new Set();  // all on, or none
-    } else {
-      // start from the current effective set (all ids if sel is null)
-      const set = ctx.sel ? new Set(ctx.sel) : new Set(ctx.machines.map((m) => m.id));
-      if (e.target.checked) set.add(mid); else set.delete(mid);
-      ctx.sel = set.size === ctx.machines.length ? null : set;
-    }
-    saveSel(ctx.sel);
-    buildFilterMenu();         // refresh checkmarks + label
-    applyFilter();             // add/remove lanes, relayout
-  }
-
-  // create lanes for visible machines, drop hidden ones, then relayout+repaint.
-  // Re-enabling a machine restores its data from dataCache for an INSTANT paint,
-  // then we always kick a fresh buffer load for the current window so a machine
-  // whose cache is empty (or stale) actually fills in. The fresh load is cheap:
-  // a recently-seen window is served from bulkCache with no network at all.
-  function applyFilter() {
-    let idx = 0;
-    for (const { id, name } of ctx.machines) {
-      if (isVisible(id)) {
-        const lane = ensureLane(id, name, idx++);
-        lane.nameEl.textContent = name;
-        const cached = ctx.dataCache.get(id);
-        if (cached && (!lane.parts || !lane.parts.length) && (!lane.bands || !lane.bands.length)) {
-          lane.parts = cached.parts;
-          lane.groups = cached.groups;
-          lane.bands = cached.bands || [];
-          lane.truncated = cached.truncated;
-        }
-      } else {
-        removeLane(id);
-      }
-    }
-    resize();
-    repaint();
-    // Always refresh the current window for the visible set. A cached non-empty
-    // window is a bulkCache hit (instant, no network); an empty/missing one
-    // triggers the real fetch — this is what fixes "select a machine, never
-    // loads": an empty cached lane is no longer mistaken for "already loaded".
-    ensureBuffer(true);
   }
 
   function toggleFilterMenu(open) {
@@ -271,1297 +529,1864 @@ export function mountTimeline(body, dataLayer) {
     refs.filterMenu.hidden = !show;
     refs.filterBtn.setAttribute("aria-expanded", String(show));
   }
-  refs.filterBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleFilterMenu(); });
-  // click outside closes the menu
+  refs.filterBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFilterMenu();
+  });
   const onDocClick = (e) => {
     if (!refs.filterWrap.contains(e.target)) toggleFilterMenu(false);
   };
   document.addEventListener("click", onDocClick);
 
-  function windowSpan() {
-    const span = ctx.spanMs;
-    const to = ctx.live ? Date.now() : ctx.anchor;
-    return { from: to - span, to, span };
-  }
-
-  function setRange(key) {
-    if (!RANGE_MS[key]) return;
-    ctx.rangeKey = key;
-    ctx.spanMs = RANGE_MS[key];  // preset jumps reset the continuous zoom
-    localStorage.setItem(LS_RANGE, key);
-    syncRangeBtns();
-    if (ctx.pinned) unpin();    // pinned part may leave the view on a span change
-    // re-center NOW in the new span (matches the on-load centered view)
-    ctx.live = false;
-    ctx.anchor = Date.now() + RANGE_MS[key] * 0.5;
-    ctx.buf.loaded = false;     // new span → buffer no longer valid
-    ctx.cover.has = false;      // new span → contiguous coverage restarts
-    loadRange(true);
-  }
-  function scroll(dir) {
-    const span = ctx.spanMs;
-    const step = span * 0.5;
-    const maxFuture = Date.now() + span * 0.5;   // allow half a span of empty future room
-    const base = ctx.live ? Date.now() : ctx.anchor;
-    let next = base + dir * step;
-    if (next > maxFuture) next = maxFuture;       // cap how far into the future we scroll
-    // live only when the right edge sits ~at now; past that we're future-anchored.
-    if (Math.abs(next - Date.now()) < 1000) { ctx.live = true; }
-    else { ctx.live = false; ctx.anchor = next; }
-    paintWinLabel();
-    repaint();
-    ensureBuffer();
-  }
-  refs.prev.addEventListener("click", () => scroll(-1));
-  refs.next.addEventListener("click", () => scroll(1));
-
-  // ---- grab the top time ruler and drag to stretch/zoom ----
-  // Drag right = stretch hours apart (zoom in / shorter span). Drag left =
-  // squeeze (zoom out / longer span). Everything is computed from a FROZEN
-  // snapshot taken at grab time so there's no compounding drift: we keep the
-  // timestamp under the grab point pinned and only rescale the span.
-  function attachAxisStretch(canvas) {
-    let active = false, grabX = 0, grabFrac = 0.5, startSpan = 0, pivot = 0, moved = false;
-    canvas.style.cursor = "ew-resize";
-    canvas.addEventListener("pointerdown", (e) => {
+  // ---- Axis drag-to-zoom ----
+  {
+    let active = false;
+    let grabX = 0;
+    let grabFrac = 0.5;
+    let startSpan = 0;
+    let pivot = 0;
+    let moved = false;
+    refs.axis.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
-      active = true; moved = false;
+      active = true;
+      moved = false;
       grabX = e.clientX;
-      const w = canvas.clientWidth || 1;
-      grabFrac = Math.min(1, Math.max(0, e.offsetX / w));
+      const w = refs.axis.clientWidth || 1;
+      grabFrac = Math.max(0, Math.min(1, e.offsetX / w));
       startSpan = ctx.spanMs;
-      // freeze the timestamp under the cursor at grab time
-      const to = ctx.live ? Date.now() : ctx.anchor;
-      pivot = (to - startSpan) + grabFrac * startSpan;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+      const { from } = windowSpan();
+      pivot = from + grabFrac * startSpan;
+      try { refs.axis.setPointerCapture(e.pointerId); } catch {}
       e.preventDefault();
     });
-    canvas.addEventListener("pointermove", (e) => {
+    refs.axis.addEventListener("pointermove", (e) => {
       if (!active) return;
-      const w = canvas.clientWidth || 1;
+      const w = refs.axis.clientWidth || 1;
       const dx = e.clientX - grabX;
       if (Math.abs(dx) > 2) moved = true;
-      // drag a full canvas width right => ~3x zoom in; left => ~3x out.
-      const factor = Math.exp(-(dx / w) * 1.1);
-      let next = Math.max(MIN_SPAN, Math.min(MAX_SPAN, startSpan * factor));
-      // keep `pivot` under grabFrac of the new span
+      const next = Math.max(MIN_SPAN, Math.min(MAX_SPAN, startSpan * Math.exp(-(dx / w) * 1.15)));
       let newTo = pivot + (1 - grabFrac) * next;
-      const now = Date.now();
-      const maxFuture = now + next * 0.5;
-      if (newTo > maxFuture) newTo = maxFuture;
+      const cap = maxFutureAnchor(next);
       ctx.spanMs = next;
-      if (Math.abs(newTo - now) < 1000) { ctx.live = true; ctx.anchor = now; }
-      else { ctx.live = false; ctx.anchor = newTo; }
-      syncRangeBtns();
+      ctx.presetKey = "";
+      if (newTo >= cap - 1500) {
+        ctx.live = true;
+        ctx.anchor = cap;
+      } else {
+        ctx.live = false;
+        ctx.anchor = newTo;
+      }
+      syncPresetBtns();
       paintWinLabel();
-      repaint();
+      markDirty({ all: true });
     });
     const end = (e) => {
       if (!active) return;
       active = false;
-      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
-      if (moved) ensureBuffer(true);
+      try { refs.axis.releasePointerCapture(e.pointerId); } catch {}
+      if (moved) {
+        ensureBuffer(true);
+        refreshExpandedSeries();
+      }
     };
-    canvas.addEventListener("pointerup", end);
-    canvas.addEventListener("pointercancel", end);
-  }
-  if (refs.axis) attachAxisStretch(refs.axis);
-  refs.now.addEventListener("click", () => { ctx.live = true; paintWinLabel(); repaint(); ensureBuffer(); });
-
-  // ---- jump to a specific calendar day (date picker) ----
-  // Center the visible window on noon of the chosen IST day, keeping the
-  // current zoom level. Future days clamp so the window never runs past now.
-  function jumpToDate(yyyyMmDd) {
-    if (!yyyyMmDd) return;
-    const [y, mo, d] = yyyyMmDd.split("-").map(Number);
-    if (!y || !mo || !d) return;
-    // local midnight of that day in IST, then center on 12:00
-    const dayStartUtc = Date.UTC(y, mo - 1, d) - IST_OFFSET;
-    const center = dayStartUtc + 12 * 3600e3;
-    let to = center + ctx.spanMs * 0.5;
-    const now = Date.now();
-    const maxFuture = now + ctx.spanMs * 0.5;
-    if (to > maxFuture) to = maxFuture;
-    if (ctx.pinned) unpin();
-    if (Math.abs(to - now) < 1000) { ctx.live = true; ctx.anchor = now; }
-    else { ctx.live = false; ctx.anchor = to; }
-    ctx.buf.loaded = false;
-    ctx.cover.has = false;
-    paintWinLabel();
-    repaint();
-    loadRange(true);
-  }
-  if (refs.datePick) refs.datePick.addEventListener("change", (e) => jumpToDate(e.target.value));
-
-  // ---- calendar-style pan: shift the window's right edge by a time delta ----
-  // dtMs > 0 moves toward the future, < 0 toward the past. We clamp the future
-  // to "now" and snap back into live mode when the window reaches the present.
-  function panByMs(dtMs) {
-    const span = ctx.spanMs;
-    const base = ctx.live ? Date.now() : ctx.anchor;
-    let next = base + dtMs;
-    const now = Date.now();
-    const maxFuture = now + span * 0.5;           // half-span of empty future room
-    if (next > maxFuture) next = maxFuture;
-    if (Math.abs(next - now) < 1000) { ctx.live = true; ctx.anchor = now; }
-    else { ctx.live = false; ctx.anchor = next; }
-    paintWinLabel();
-    repaint();              // instant: paint against the already-loaded buffer
-    ensureBuffer();         // only refetches if the view nears the buffer edge
-  }
-  // pan by a pixel delta on a lane canvas (px → ms via the active span)
-  function panByPx(dxPx, canvasW) {
-    const span = ctx.spanMs;
-    if (!canvasW) return;
-    panByMs(-(dxPx / canvasW) * span); // drag right → go back in time
+    refs.axis.addEventListener("pointerup", end);
+    refs.axis.addEventListener("pointercancel", end);
   }
 
-  // ---- continuous zoom / stretch (Ctrl|⌘ + wheel, or pinch) ----------------
-  // Clamp the visible span between 5 minutes and 60 days. factor < 1 zooms in
-  // (shorter span / more detail), > 1 zooms out. fracX is the cursor position
-  // across the canvas (0..1) so the timestamp under the pointer stays put —
-  // exactly how a map/calendar zoom feels.
-  const MIN_SPAN = 5 * 60e3;          // 5 minutes
-  const MAX_SPAN = 60 * 86400e3;      // 60 days
-  function zoomBy(factor, fracX) {
-    const oldSpan = ctx.spanMs;
-    let next = oldSpan * factor;
-    next = Math.max(MIN_SPAN, Math.min(MAX_SPAN, next));
-    if (next === oldSpan) return;
-    const f = (typeof fracX === "number" && fracX >= 0 && fracX <= 1) ? fracX : 0.5;
-    // timestamp currently under the cursor (window right edge = to)
-    const to = ctx.live ? Date.now() : ctx.anchor;
-    const from = to - oldSpan;
-    const pivot = from + f * oldSpan;
-    // new right edge keeps `pivot` under the same fraction of the new span
-    let newTo = pivot + (1 - f) * next;
-    const now = Date.now();
-    const maxFuture = now + next * 0.5;
-    if (newTo > maxFuture) newTo = maxFuture;
-    ctx.spanMs = next;
-    if (Math.abs(newTo - now) < 1000) { ctx.live = true; ctx.anchor = now; }
-    else { ctx.live = false; ctx.anchor = newTo; }
-    syncRangeBtns();
-    paintWinLabel();
-    repaint();
-    // debounced fresh buffer: a big zoom can outrun incremental prefetch, so
-    // pull a wide buffer centered on the new view once the wheel settles.
-    if (zoomBufTimer) clearTimeout(zoomBufTimer);
-    zoomBufTimer = setTimeout(() => ensureBuffer(true), 180);
-  }
-  let zoomBufTimer = null;
-  // If the visible window is comfortably inside the loaded buffer, do nothing
-  // (seamless). Only when we approach an edge — or the buffer is empty / stale —
-  // do we pull a fresh, wider buffer centered on the current view.
-  // Prefetch gate: keep a full span of loaded runway on each side of the view.
-  // When the visible window comes within one span of the contiguous coverage
-  // edge, pull more (older or newer) and merge — so the user scrolling back
-  // always lands on already-loaded data and never sees an empty band.
-  let bufTimer = null;
-  function ensureBuffer(force) {
-    if (force) {                       // range switch / Now → start coverage over
-      ctx.cover.has = false;
-      if (bufTimer) clearTimeout(bufTimer);
-      bufTimer = setTimeout(() => loadBuffer(true), 0);
-      return;
-    }
-    const { from, to, span } = windowSpan();
-    const c = ctx.cover;
-    if (!c.has) { bufTimer = setTimeout(() => loadBuffer(false), 0); return; }
-    const nowish = Date.now() - 5e3;
-    // within one span of either coverage edge → fetch more (right edge only
-    // matters when there's real future room, i.e. we're not already at ~now)
-    const nearPast = (from - c.from) < span;
-    const nearFuture = (c.to < nowish) && (c.to - to) < span;
-    if (!nearPast && !nearFuture) return;          // comfortably inside coverage
-    if (bufTimer) clearTimeout(bufTimer);
-    bufTimer = setTimeout(() => loadBuffer(false), 120);
-  }
-
+  // ---- Window label ----
   function paintWinLabel() {
     const { from, to } = windowSpan();
-    const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
-    const left = sameDay ? clock(from) : `${dayLabel(from)} ${clock(from)}`;
-    const right = ctx.live ? "now" : (sameDay ? clock(to) : `${dayLabel(to)} ${clock(to)}`);
-    const head = sameDay ? `${dayLabel(from)} · ` : "";
-    refs.winlabel.textContent = `${head}${left} → ${right}`;
-    refs.winlabel.classList.toggle("is-live", ctx.live);
+    const effTo = ctx.live ? Date.now() : to;
+    const sameDay = fmtDayIST(from) === fmtDayIST(effTo);
+    const left = sameDay ? fmtClockIST(from) : `${fmtDayIST(from)} ${fmtClockIST(from)}`;
+    const right = ctx.live ? "now" : (sameDay ? fmtClockIST(effTo) : `${fmtDayIST(effTo)} ${fmtClockIST(effTo)}`);
+    const head = sameDay ? `${fmtDayIST(from)} · ` : "";
+    refs.winLabel.textContent = `${head}${left} → ${right} IST`;
+    refs.winLabel.classList.toggle("is-live", ctx.live);
+    if (refs.datePick) refs.datePick.value = fmtIsoDateIST((from + effTo) / 2);
   }
 
-  // ---- lane lifecycle (one row per machine in the grid) ----
-  function ensureLane(id, name, idx) {
+  // ---- Synchronized 8-lane crosshair (zero canvas redraw!) ----
+  function updateCrosshair(clientX) {
+    const trackRect = refs.rulerTrack.getBoundingClientRect();
+    if (!trackRect.width) return;
+    const relX = clientX - trackRect.left;
+    if (relX < 0 || relX > trackRect.width) {
+      hideCrosshair();
+      return;
+    }
+    const { from, span } = windowSpan();
+    const ts = from + (relX / trackRect.width) * span;
+    refs.xhairLine.style.transform = `translateX(${Math.round(relX)}px)`;
+    refs.xhairLine.hidden = false;
+    refs.xhairTime.textContent = fmtClockSecIST(ts);
+    const clampedChipX = Math.max(40, Math.min(trackRect.width - 40, relX));
+    refs.xhairTime.style.left = `${clampedChipX}px`;
+    refs.xhairTime.hidden = false;
+  }
+
+  function hideCrosshair() {
+    refs.xhairLine.hidden = true;
+    refs.xhairTime.hidden = true;
+    refs.callout.hidden = true;
+  }
+
+  // ---- Lane lifecycle (fits all 8 machines cleanly + inline expandable telemetry strip) ----
+  function computeLaneHeight() {
+    const n = Math.max(1, ctx.lanes.size || 8);
+    const vh = window.innerHeight || 900;
+    // Budget for 8 lanes + KPI strip + toolbar + legend + ruler + minimap on desktop
+    const reserved = 305;
+    const avail = Math.max(54 * n, vh - reserved);
+    const ideal = Math.floor(avail / n);
+    return Math.max(54, Math.min(72, ideal));
+  }
+
+  function ensureLane(id, name) {
     let lane = ctx.lanes.get(id);
-    if (lane) return lane;
-    const tint = MPAL[idx % MPAL.length];
-    const label = document.createElement("div");
-    label.className = "tl-lane-label";
-    label.innerHTML = `<i class="tl-dot"></i><span class="tl-name"></span>`;
-    label.querySelector(".tl-name").textContent = name || id;
+    if (lane) {
+      lane.name = name || id;
+      lane.nameEl.textContent = lane.name;
+      return lane;
+    }
+
+    const groupEl = document.createElement("div");
+    groupEl.className = "tl2-lane-group";
+    groupEl.dataset.mid = id;
+
+    const rowEl = document.createElement("div");
+    rowEl.className = "tl2-lane-row";
+
+    const gutter = document.createElement("button");
+    gutter.type = "button";
+    gutter.className = "tl2-gutter";
+    gutter.title = "Click to expand spindle speed & feed override trace";
+    gutter.innerHTML = `
+      <div class="tl2-g-left">
+        <div class="tl2-mhead">
+          <span class="tl2-mname"></span>
+          <span class="tl2-mstate st-idle">—</span>
+        </div>
+        <div class="tl2-mmeta">—</div>
+      </div>
+      <div class="tl2-g-right">
+        <span class="tl2-mutil">—</span>
+        <span class="tl2-mchev">▾</span>
+      </div>
+    `;
+    gutter.querySelector(".tl2-mname").textContent = name || id;
+
     const canvas = document.createElement("canvas");
-    canvas.className = "tl-lane-canvas";
-    refs.grid.appendChild(label);
-    refs.grid.appendChild(canvas);
-    lane = { label, canvas, dot: label.querySelector(".tl-dot"),
-             nameEl: label.querySelector(".tl-name"),
-             tint, parts: [], groups: [], bands: [], rects: [], grects: [] };
+    canvas.className = "tl2-lane-canvas";
+
+    rowEl.appendChild(gutter);
+    rowEl.appendChild(canvas);
+
+    const expandRow = document.createElement("div");
+    expandRow.className = "tl2-expand-row";
+    expandRow.hidden = !ctx.expanded.has(id);
+    expandRow.innerHTML = `
+      <div class="tl2-expand-gutter">
+        <div class="tl2-expand-title">Live Telemetry Trace</div>
+        <div class="tl2-expand-kv"><span>Spindle</span><strong data-ef="rpm">—</strong></div>
+        <div class="tl2-expand-kv"><span>Feed Ovr</span><strong data-ef="feed">—</strong></div>
+        <div class="tl2-expand-kv"><span>Tool</span><strong data-ef="tool">—</strong></div>
+        <div class="tl2-expand-legend">
+          <span style="color:var(--tl2-cobalt)">━ RPM</span>
+          <span style="color:var(--tl2-amber)">━ Feed %</span>
+        </div>
+      </div>
+      <canvas class="tl2-expand-canvas"></canvas>
+    `;
+
+    groupEl.appendChild(rowEl);
+    groupEl.appendChild(expandRow);
+    refs.lanesHost.appendChild(groupEl);
+
+    lane = {
+      id,
+      name: name || id,
+      groupEl,
+      rowEl,
+      gutter,
+      nameEl: gutter.querySelector(".tl2-mname"),
+      stateEl: gutter.querySelector(".tl2-mstate"),
+      metaEl: gutter.querySelector(".tl2-mmeta"),
+      utilEl: gutter.querySelector(".tl2-mutil"),
+      canvas,
+      g: null,
+      expandRow,
+      expandCanvas: expandRow.querySelector(".tl2-expand-canvas"),
+      expandG: null,
+      efRpm: expandRow.querySelector('[data-ef="rpm"]'),
+      efFeed: expandRow.querySelector('[data-ef="feed"]'),
+      efTool: expandRow.querySelector('[data-ef="tool"]'),
+      parts: [],
+      groups: [],
+      bands: [],
+      truncated: false,
+      hitParts: [],
+      hitGroups: [],
+      hitGaps: [],
+      hitPins: [],
+      summary: null,
+    };
+
+    gutter.addEventListener("click", () => toggleExpand(id));
+    canvas.addEventListener("mousemove", (e) => {
+      updateCrosshair(e.clientX);
+      if (!ctx.dragging) onLaneHover(e, id);
+    });
+    canvas.addEventListener("mouseleave", () => {
+      if (!ctx.dragging) hideCrosshair();
+    });
+    canvas.addEventListener("click", (e) => {
+      if (!ctx.didPan) onLaneClick(e, id);
+    });
+    expandRow.querySelector(".tl2-expand-canvas").addEventListener("mousemove", (e) => {
+      updateCrosshair(e.clientX);
+    });
+    expandRow.querySelector(".tl2-expand-canvas").addEventListener("mouseleave", hideCrosshair);
+    attachPanAndZoom(canvas);
+
     ctx.lanes.set(id, lane);
-    canvas.addEventListener("mousemove", (e) => onHover(e, id));
-    canvas.addEventListener("mouseleave", () => { if (!ctx.dragging && !ctx.pinned) refs.tip.hidden = true; });
-    canvas.addEventListener("click", (e) => { if (!ctx.didPan) onClick(e, id); });
-    attachPan(canvas);
     return lane;
   }
+
   function removeLane(id) {
     const lane = ctx.lanes.get(id);
     if (!lane) return;
-    lane.label.remove(); lane.canvas.remove();
+    lane.groupEl.remove();
     ctx.lanes.delete(id);
   }
 
-  // ---- drag-to-pan + wheel-pan wiring (calendar-style time scrolling) ----
-  // Grab any lane and slide left/right to move through time; release to settle.
-  // Trackpad horizontal scroll (or Shift+wheel) pans without grabbing.
-  function attachPan(canvas) {
+  function syncVisibleLanes() {
+    for (const { id, name } of ctx.machines) {
+      if (isVisible(id)) {
+        const lane = ensureLane(id, name);
+        const cached = ctx.dataCache.get(id);
+        if (cached && !lane.parts.length && !lane.bands.length) {
+          lane.parts = cached.parts || [];
+          lane.groups = cached.groups || [];
+          lane.bands = cached.bands || [];
+          lane.truncated = !!cached.truncated;
+        }
+      } else {
+        removeLane(id);
+      }
+    }
+    for (const id of [...ctx.lanes.keys()]) {
+      if (!ctx.machines.some((m) => m.id === id)) removeLane(id);
+    }
+    syncCanvasSizes();
+    markDirty({ all: true });
+    ensureBuffer(false);
+  }
+
+  function toggleExpand(id) {
+    const lane = ctx.lanes.get(id);
+    if (!lane) return;
+    if (ctx.expanded.has(id)) {
+      ctx.expanded.delete(id);
+      lane.groupEl.classList.remove("is-expanded");
+      lane.expandRow.hidden = true;
+    } else {
+      ctx.expanded.add(id);
+      lane.groupEl.classList.add("is-expanded");
+      lane.expandRow.hidden = false;
+      syncCanvasSizes();
+      loadMachineSeries(id);
+    }
+    markDirty({ expand: true });
+  }
+
+  // ---- Pan & Zoom on lane canvases ----
+  function attachPanAndZoom(canvas) {
     canvas.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       ctx.dragging = true;
-      ctx.didPan = false;                 // becomes true once the pointer travels
+      ctx.didPan = false;
       ctx.panStartX = e.clientX;
       ctx.panLastX = e.clientX;
-      refs.grid.classList.add("is-panning");
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+      refs.board.classList.add("is-panning");
+      refs.callout.hidden = true;
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
       e.preventDefault();
     });
     canvas.addEventListener("pointermove", (e) => {
       if (!ctx.dragging) return;
       const dx = e.clientX - ctx.panLastX;
       ctx.panLastX = e.clientX;
-      // only count as a pan (and suppress the click-pin) past a small threshold
-      if (Math.abs(e.clientX - ctx.panStartX) > 4) {
-        if (!ctx.didPan && !ctx.pinned) refs.tip.hidden = true; // first real drag hides hovercard
-        ctx.didPan = true;
-      }
-      if (dx) panByPx(dx, canvas.clientWidth);
+      if (Math.abs(e.clientX - ctx.panStartX) > 4) ctx.didPan = true;
+      if (dx) panByPx(dx);
     });
     const end = (e) => {
       if (!ctx.dragging) return;
       ctx.dragging = false;
-      refs.grid.classList.remove("is-panning");
-      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
-      ensureBuffer();   // settle: pull data if the release left us near an edge
+      refs.board.classList.remove("is-panning");
+      try { canvas.releasePointerCapture(e.pointerId); } catch {}
+      if (ctx.didPan) {
+        ensureBuffer(false);
+        refreshExpandedSeries();
+      }
     };
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
-    // horizontal wheel / shift+wheel → pan; pick the dominant axis.
-    // Ctrl|⌘ + wheel (or pinch-zoom, which browsers report as ctrl+wheel) → zoom,
-    // anchored at the cursor.
     canvas.addEventListener("wheel", (e) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        const w = canvas.clientWidth || 1;
-        const fracX = e.offsetX / w;
-        // wheel up / pinch out (deltaY < 0) → zoom in (shrink span)
-        const factor = Math.exp(e.deltaY * 0.0015);
-        zoomBy(factor, fracX);
+        const fracX = (e.offsetX || 0) / Math.max(1, canvas.clientWidth || 1);
+        zoomBy(Math.exp(e.deltaY * 0.0016), fracX);
         return;
       }
-      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX
-        : (e.shiftKey ? e.deltaY : 0);
-      if (!dx) return;                 // vertical wheel → let the grid scroll
+      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+      if (!dx) return;
       e.preventDefault();
-      panByPx(-dx, canvas.clientWidth); // wheel right → forward in time
+      panByPx(-dx);
     }, { passive: false });
   }
 
-  // ---- parts now arrive pre-segmented from /api/timeline_bulk ----
-  // (the collector folds the 1 Hz cyremtim countdown into part segments and
-  // joins the tcycle target server-side, so the browser never sees raw rows.)
-
-  // Colour a part by how far it deviates from its program's LEARNED baseline
-  // (median cycle time for that program, computed server-side from real cycles).
-  //   normal  → within ±15%               (green)
-  //   high    → +15–30% slower than usual  (amber)
-  //   over    → >+30% slower than usual     (red)
-  //   low     → >15% shorter than usual     (blue: ran fast / aborted)
-  //   neutral → no baseline yet (too few cycles for this program)
-  function partColor(p) {
-    if (p.partial) return "partial";
-    const dev = p.dev;                 // dur / baseline, from the server
-    if (dev == null) return "neutral"; // honest: not enough data to judge
-    if (dev > 1 + WIDE) return "over";
-    if (dev > 1 + NORMAL) return "high";
-    if (dev < 1 - NORMAL) return "low";
-    return "normal";
+  // ---- Canvas sizing via ResizeObserver (no layout thrashing!) ----
+  function setupCanvas(cv, w, h) {
+    const dpr = window.devicePixelRatio || 1;
+    const tw = Math.max(1, Math.round(w * dpr));
+    const th = Math.max(1, Math.round(h * dpr));
+    if (cv.width !== tw || cv.height !== th) {
+      cv.width = tw;
+      cv.height = th;
+    }
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return g;
   }
 
-  // Bootstrap: refresh the machine list (overview) then pull a data buffer.
-  // force=true always reloads the buffer (range switch / Now / first paint).
-  async function loadRange(force) {
-    const my = ++ctx.token;
-    paintWinLabel(); syncRangeBtns();
-    let ov;
-    try { ov = await dataLayer.overview(); }
-    catch (err) { 
-      if (!ctx.machines.length) { 
-        const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('aborted'));
-        refs.note.textContent = isTimeout 
-          ? "Loading timeline — collector is slow, please wait…" 
-          : "Collector unreachable — cannot fetch machine list.";
-        refs.note.hidden = false; 
-      } 
-      return; 
+  function syncCanvasSizes() {
+    const trackW = refs.rulerTrack ? refs.rulerTrack.clientWidth : 800;
+    if (trackW > 40) ctx.trackW = trackW;
+    ctx.laneH = computeLaneHeight();
+
+    refs.axisG = setupCanvas(refs.axis, ctx.trackW, 30);
+    refs.minimapG = setupCanvas(refs.minimapCanvas, ctx.trackW, 40);
+
+    for (const lane of ctx.lanes.values()) {
+      lane.canvas.style.height = `${ctx.laneH}px`;
+      lane.rowEl.style.minHeight = `${ctx.laneH}px`;
+      lane.g = setupCanvas(lane.canvas, ctx.trackW, ctx.laneH);
+      if (ctx.expanded.has(lane.id)) {
+        lane.expandG = setupCanvas(lane.expandCanvas, ctx.trackW, 116);
+      }
     }
-    if (my !== ctx.token) return;
-    const machines = (Array.isArray(ov.machines) ? ov.machines : [])
-      .map((m) => ({ id: m.machine_id, name: m.machine_name || m.machine_id, m }));
-    if (!machines.length) { if (!ctx.machines.length) { refs.note.textContent = "No machines reported."; refs.note.hidden = false; } return; }
-    // Wall presentation order: the wall fleet order, not payload order. Applied
-    // on every overview (which rebuilds this array) so it survives polls; the
-    // dashboard path never sets wallOrder and keeps payload order.
-    if (ctx.wallOrder) {
-      const rank = {};
-      ctx.wallOrder.forEach((id, i) => { if (!(id in rank)) rank[id] = i; });
-      machines.sort((a, b) => {
-        const ra = (a.id in rank) ? rank[a.id] : 1e9;
-        const rb = (b.id in rank) ? rank[b.id] : 1e9;
-        return ra - rb;
-      });
-    }
-    ctx.machines = machines;
-    ctx.over = new Map(machines.map((x) => [x.id, x.m]));
-    // prune any saved selection down to machines that still exist
-    if (ctx.sel) {
-      const live = new Set(machines.map((m) => m.id));
-      ctx.sel = new Set([...ctx.sel].filter((id) => live.has(id)));
-      if (!ctx.sel.size || ctx.sel.size === machines.length) ctx.sel = null;
-    }
-    buildFilterMenu();
-    // make sure a lane row exists for every VISIBLE machine before the buffer
-    // arrives; drop lanes for machines hidden by the filter or gone from overview
-    let vidx = 0;
-    for (const { id, name } of machines) {
-      if (isVisible(id)) ensureLane(id, name, vidx++).nameEl.textContent = name;
-      else removeLane(id);
-    }
-    for (const id of [...ctx.lanes.keys()]) {
-      if (!machines.some((x) => x.id === id)) removeLane(id);
-    }
-    await loadBuffer(force);
   }
 
-  // Load a buffer WIDER than the visible window (3× the span, centered on the
-  // view) so panning stays inside loaded data and feels seamless. We never wipe
-  // lanes on a failed/empty fetch — the last good frame stays on screen.
-  //
-  // Caching: bulk responses are memoized in ctx.bulkCache keyed by the rounded
-  // window. A window that ends in the past is IMMUTABLE (those cycles already
-  // ran) → cached for the whole session, zero refetch. The live window (ends at
-  // "now") is cached only briefly (LIVE_TTL) so the moving edge stays current.
-  // Every fetched machine's data is also stashed in ctx.dataCache so a filter
-  // hide→show never needs the network.
-  const LIVE_TTL = 4000;             // ms a live-window fetch stays fresh
-  const CACHE_BUCKET = 30e3;         // round window edges to 30s for cache hits
-  function bulkKey(bFrom, bTo) {
-    const r = (v) => Math.round(v / CACHE_BUCKET);
-    return `${r(bFrom)}:${r(bTo)}`;
+  const ro = typeof ResizeObserver !== "undefined"
+    ? new ResizeObserver(() => {
+        if (ctx.destroyed) return;
+        syncCanvasSizes();
+        markDirty({ all: true });
+      })
+    : null;
+  if (ro && refs.rulerTrack) ro.observe(refs.rulerTrack);
+
+  // ---- Smart Buffer Fetching (tight 0.5x left runway instead of 5x over-fetch) ----
+  const LIVE_TTL = 4000;
+  const CACHE_BUCKET = 30e3;
+  function bulkKey(f, t) {
+    return `${Math.round(f / CACHE_BUCKET)}:${Math.round(t / CACHE_BUCKET)}`;
   }
-  // merge freshly-fetched parts/groups/bands into a lane's existing arrays WITHOUT
-  // wiping what's already there — this is what turns scrolling back into a
-  // seamless "paged" experience: each fetch extends one contiguous dataset
-  // instead of replacing the visible window. Identity: a part by (t0,job), a
-  // group by groupId, a band by (t0,t1,status), so re-fetching an overlapping
-  // span never duplicates.
+
   function mergeInto(lane, got) {
-    const partKey = (p) => `${p.t0}|${p.job}`;
-    const seen = new Map((lane.parts || []).map((p) => [partKey(p), p]));
-    for (const p of got.parts || []) seen.set(partKey(p), p);
-    lane.parts = [...seen.values()].sort((a, b) => a.t0 - b.t0);
-    const gseen = new Map((lane.groups || []).map((g) => [g.groupId, g]));
-    for (const g of got.groups || []) gseen.set(g.groupId, g);
-    lane.groups = [...gseen.values()].sort((a, b) => a.t0 - b.t0);
-    const bseen = new Map((lane.bands || []).map((b) => [`${b.t0}|${b.t1}|${b.status}`, b]));
-    for (const b of got.bands || []) {
-      if (b && Number.isFinite(b.t0) && Number.isFinite(b.t1)) bseen.set(`${b.t0}|${b.t1}|${b.status}`, b);
+    const partKey = (p) => `${Math.round(p.t0 / 1000)}|${p.job}`;
+    const pMap = new Map((lane.parts || []).map((p) => [partKey(p), p]));
+    for (const p of got.parts || []) pMap.set(partKey(p), p);
+    lane.parts = [...pMap.values()].sort((a, b) => a.t0 - b.t0);
+
+    const gMap = new Map((lane.groups || []).map((g) => [g.groupId, g]));
+    for (const g of got.groups || []) {
+      const prev = gMap.get(g.groupId);
+      if (prev) {
+        gMap.set(g.groupId, {
+          ...prev,
+          t0: Math.min(prev.t0, g.t0),
+          t1: Math.max(prev.t1, g.t1),
+          count: Math.max(prev.count, g.count),
+        });
+      } else {
+        gMap.set(g.groupId, g);
+      }
     }
-    lane.bands = [...bseen.values()].sort((a, b) => a.t0 - b.t0);
+    lane.groups = [...gMap.values()].sort((a, b) => a.t0 - b.t0);
+
+    const bMap = new Map((lane.bands || []).map((b) => [`${Math.round(b.t0 / 1000)}|${Math.round(b.t1 / 1000)}|${b.status}`, b]));
+    for (const b of got.bands || []) {
+      if (b && Number.isFinite(b.t0) && Number.isFinite(b.t1)) {
+        bMap.set(`${Math.round(b.t0 / 1000)}|${Math.round(b.t1 / 1000)}|${b.status}`, b);
+      }
+    }
+    lane.bands = [...bMap.values()].sort((a, b) => a.t0 - b.t0);
     if (got.truncated) lane.truncated = true;
   }
 
-  // apply a fetched bulk: merge=true extends the accumulated dataset (panning /
-  // prefetch), merge=false replaces it (a fresh range/Now load starts over).
-  function applyBulk(byMachine, evKey, merge) {
-    ctx.machines.forEach(({ id }) => {
+  function applyBulk(byMachine, evWin, merge) {
+    for (const { id } of ctx.machines) {
       const got = byMachine.get(id);
-      if (!got) return;
+      if (!got) continue;
       const lane = ctx.lanes.get(id);
       if (merge && lane) {
         mergeInto(lane, got);
         ctx.dataCache.set(id, { parts: lane.parts, groups: lane.groups, bands: lane.bands, truncated: lane.truncated });
       } else {
-        ctx.dataCache.set(id, { parts: got.parts, groups: got.groups, bands: got.bands || [], truncated: got.truncated });
-        if (lane) { lane.parts = got.parts; lane.groups = got.groups; lane.bands = got.bands || []; lane.truncated = got.truncated; }
-      }
-    });
-    if (evKey) loadEvents(evKey.from, evKey.to);
-  }
-
-  // In-flight fetch keys (per rounded window) so concurrent pages don't dup the
-  // same request. A "force" (range switch / Now) load uses ctx.token to cancel
-  // stale REPLACE loads; merge (paging) loads are orthogonal — they only ADD
-  // older/newer data, so they always complete and grow coverage monotonically.
-  const inflight = new Set();
-  async function loadBuffer(force) {
-    // TV mode: clamp to current shift window only, resetting at 06/14/22 IST
-    if (window.__VMC_TV__) {
-      try {
-        const ov = await dataLayer.overview();
-        const first = (ov.machines || [])[0];
-        const sh = first && first.shift_summary;
-        if (sh && sh.from && sh.to) {
-          const bFrom = sh.from;
-          const bTo = sh.to;
-          window.__vmcTvTimelineRefresh = () => loadBuffer(true);
-          // replace cover with shift window
-          ctx.cover = { from: bFrom, to: bTo, has: false };
-          const bulk = await dataLayer.timelineBulk(bFrom, bTo);
-          applyBulk(new Map(bulk.lanes.map((l) => [l.machine, l])), { from: bFrom, to: bTo }, false);
-          ctx.buf = { from: bFrom, to: bTo, loaded: true };
-          refs.note.hidden = true;
-          resize(); repaint();
-          return;
+        const clean = { parts: got.parts || [], groups: got.groups || [], bands: got.bands || [], truncated: !!got.truncated };
+        ctx.dataCache.set(id, clean);
+        if (lane) {
+          lane.parts = clean.parts;
+          lane.groups = clean.groups;
+          lane.bands = clean.bands;
+          lane.truncated = clean.truncated;
         }
-      } catch (_) {}
-    }
-    const { from, to, span } = windowSpan();
-    // Prefetch a generous runway: pad TWO spans on each side so a fast scroll
-    // stays inside loaded data. Right edge clamps to ~now (no future data).
-    const pad = span * 2;
-    let bFrom = from - pad;
-    let bTo = Math.min(to + pad, Date.now() + 60e3);
-
-    // On a non-forced load we EXTEND the contiguous coverage: only fetch the
-    // gap between what we already have and the new runway, then merge. This is
-    // the paging behaviour — scrolling back keeps appending older data to one
-    // growing dataset instead of swapping the window out from under you.
-    const merge = !force && ctx.cover.has;
-    if (merge) {
-      // already fully covered with comfortable runway → nothing to do
-      if (bFrom >= ctx.cover.from && bTo <= ctx.cover.to) return;
-      // fetch only the missing side(s); pick the larger gap (usually the past)
-      if (bFrom < ctx.cover.from && (ctx.cover.from - bFrom) >= (bTo - ctx.cover.to)) {
-        bTo = ctx.cover.from;          // extend into the past
-      } else if (bTo > ctx.cover.to) {
-        bFrom = ctx.cover.to;          // extend into the future
-      } else {
-        bTo = ctx.cover.from;          // default: pull older
       }
     }
-
-    const key = bulkKey(bFrom, bTo);
-    if (inflight.has(key)) return;     // this exact span is already being fetched
-    const my = force ? ++ctx.token : ctx.token;   // only force loads bump the token
-
-    const isLiveWin = ctx.live || (Date.now() - to) < 60e3;
-    const hit = ctx.bulkCache.get(key);
-    const fresh = hit && (!isLiveWin || (Date.now() - hit.ts) < LIVE_TTL);
-    if (fresh) {                           // cache hit → no network at all
-      applyBulk(hit.byMachine, { from: bFrom, to: bTo }, merge);
-      const grew = growCover(bFrom, bTo, merge);
-      ctx.buf = { from: ctx.cover.from, to: ctx.cover.to, loaded: true };
-      refs.note.hidden = true;
-      resize(); repaint();
-      if (grew) ensureBuffer();            // chase only if we made progress
-      return;
-    }
-    inflight.add(key);
-    // skeleton/progress for every bulk flight, live or past window (same chip)
-    showLoading(true);
-    try {
-      const bulk = await dataLayer.timelineBulk(bFrom, bTo);
-      // a REPLACE load that's been superseded by a newer force load is dropped;
-      // MERGE loads are always applied (they only add disjoint data)
-      if (!merge && my !== ctx.token) return;
-      const byMachine = new Map(bulk.lanes.map((l) => [l.machine, l]));
-      ctx.bulkCache.set(key, { ts: Date.now(), byMachine });
-      if (ctx.bulkCache.size > 64) {
-        const oldest = ctx.bulkCache.keys().next().value;
-        ctx.bulkCache.delete(oldest);
-      }
-      applyBulk(byMachine, { from: bFrom, to: bTo }, merge);
-      const grew = growCover(bFrom, bTo, merge);
-      ctx.buf = { from: ctx.cover.from, to: ctx.cover.to, loaded: true };
-      refs.note.hidden = true;
-      persistSnapshot();   // device-store this fresh board for an instant cold reload
-      ctx._grew = grew;
-    } catch (err) {
-      if (!ctx.buf.loaded) { 
-        const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('aborted'));
-        refs.note.textContent = isTimeout 
-          ? "Timeline data loading slowly — please wait…" 
-          : "Timeline data unavailable: " + (err.message || "unknown error");
-        refs.note.hidden = false; 
-      }
-    } finally {
-      inflight.delete(key);
-      showLoading(false);
-    }
-    resize();
-    repaint();
-    if (ctx._grew) ensureBuffer();   // chase the runway only while we keep gaining coverage
+    if (evWin) loadEvents(evWin.from, evWin.to);
   }
 
-  // extend (merge) or reset (replace) the contiguous coverage window.
-  // Returns true if coverage actually changed — callers use this to decide
-  // whether chasing the runway with another fetch could make progress (and so
-  // avoid an infinite fetch loop when the server has no more data that way).
   function growCover(f, t, merge) {
     if (merge && ctx.cover.has) {
       const nf = Math.min(ctx.cover.from, f);
       const nt = Math.max(ctx.cover.to, t);
       const grew = nf < ctx.cover.from || nt > ctx.cover.to;
-      ctx.cover.from = nf; ctx.cover.to = nt;
+      ctx.cover.from = nf;
+      ctx.cover.to = nt;
       return grew;
     }
     ctx.cover = { from: f, to: t, has: true };
     return true;
   }
 
-  let loadingCount = 0;
-  function showLoading(on) {
-    loadingCount = Math.max(0, loadingCount + (on ? 1 : -1));
-    if (refs.loading) refs.loading.hidden = loadingCount === 0;
+  function ensureBuffer(force) {
+    if (force) {
+      ctx.cover.has = false;
+      if (bufTimer) clearTimeout(bufTimer);
+      bufTimer = setTimeout(() => loadBuffer(true), 0);
+      return;
+    }
+    const { from, to, span } = windowSpan();
+    if (!ctx.cover.has) {
+      if (bufTimer) clearTimeout(bufTimer);
+      bufTimer = setTimeout(() => loadBuffer(false), 0);
+      return;
+    }
+    const nowClamped = Date.now() - 8e3;
+    const nearLeft = from - ctx.cover.from < span * 0.28;
+    const nearRight = ctx.cover.to < nowClamped && ctx.cover.to - Math.min(to, nowClamped) < span * 0.25;
+    if (!nearLeft && !nearRight) return;
+    if (bufTimer) clearTimeout(bufTimer);
+    bufTimer = setTimeout(() => loadBuffer(false), 110);
   }
 
-  // ---- real incident events (estop / override dip) for the detail cards ----
-  // One fetch per loaded buffer; grouped by machine, ascending ts. The cards
-  // overlap these onto a program/job [t0,t1] window — all real /api/events rows,
-  // nothing invented. A failed fetch just leaves the cards without an incident
-  // section (they still show timing/quality).
-  let evBusy = false;
-  let evKey = "";          // last loaded events window — skip refetch for the same
+  async function loadBuffer(force) {
+    if (ctx.destroyed) return;
+    // TV wall mode: pin to active IST shift
+    if (window.__VMC_TV__) {
+      try {
+        const ov = await dataLayer.overview();
+        const first = (ov.machines || [])[0];
+        const sh = first && first.shift_summary;
+        if (sh && sh.from && sh.to) {
+          window.__vmcTvTimelineRefresh = () => loadBuffer(true);
+          const bulk = await dataLayer.timelineBulk(sh.from, sh.to);
+          applyBulk(new Map(bulk.lanes.map((l) => [l.machine, l])), { from: sh.from, to: sh.to }, false);
+          ctx.cover = { from: sh.from, to: sh.to, has: true };
+          ctx.bufLoaded = true;
+          refs.note.hidden = true;
+          markDirty({ all: true });
+          return;
+        }
+      } catch {}
+    }
+
+    const { from, to, span } = windowSpan();
+    const nowMs = Date.now();
+    // Tight smart runway: 0.5x left + 0.25x right (clamped to now) -> 3x faster than old 5x fetch!
+    let bFrom = from - span * 0.5;
+    let bTo = Math.min(to + span * 0.25, nowMs + 15e3);
+
+    const merge = !force && ctx.cover.has;
+    if (merge) {
+      if (bFrom >= ctx.cover.from && bTo <= ctx.cover.to) return;
+      if (bFrom < ctx.cover.from && (ctx.cover.from - bFrom) >= (bTo - ctx.cover.to)) {
+        bTo = ctx.cover.from;
+      } else if (bTo > ctx.cover.to) {
+        bFrom = ctx.cover.to;
+      } else {
+        bTo = ctx.cover.from;
+      }
+    }
+    if (bTo <= bFrom + 5000) return;
+
+    const key = bulkKey(bFrom, bTo);
+    if (inflight.has(key)) return;
+    const my = force ? ++ctx.token : ctx.token;
+
+    const isLiveWin = ctx.live || nowMs - to < 60e3;
+    const hit = ctx.bulkCache.get(key);
+    if (hit && (!isLiveWin || nowMs - hit.ts < LIVE_TTL)) {
+      applyBulk(hit.byMachine, { from: bFrom, to: bTo }, merge);
+      growCover(bFrom, bTo, merge);
+      ctx.bufLoaded = true;
+      refs.note.hidden = true;
+      markDirty({ all: true });
+      return;
+    }
+
+    inflight.add(key);
+    showLoading(true);
+    try {
+      const bulk = await dataLayer.timelineBulk(bFrom, bTo);
+      if (ctx.destroyed) return;
+      if (!merge && my !== ctx.token) return;
+      const byMachine = new Map(bulk.lanes.map((l) => [l.machine, l]));
+      ctx.bulkCache.set(key, { ts: Date.now(), byMachine });
+      if (ctx.bulkCache.size > 48) {
+        const oldest = ctx.bulkCache.keys().next().value;
+        ctx.bulkCache.delete(oldest);
+      }
+      applyBulk(byMachine, { from: bFrom, to: bTo }, merge);
+      growCover(bFrom, bTo, merge);
+      ctx.bufLoaded = true;
+      refs.note.hidden = true;
+      persistSnapshot();
+      markDirty({ all: true });
+    } catch (err) {
+      if (!ctx.bufLoaded) {
+        const isTimeout = err && (err.name === "AbortError" || String(err.message || "").includes("aborted"));
+        refs.note.textContent = isTimeout
+          ? "Timeline syncing slowly — retrying automatically…"
+          : `Timeline unavailable: ${(err && err.message) || "connection error"}`;
+        refs.note.hidden = false;
+      }
+    } finally {
+      inflight.delete(key);
+      showLoading(false);
+    }
+  }
+
   async function loadEvents(fromMs, toMs) {
-    if (evBusy) return;
+    if (evBusy || ctx.destroyed) return;
     const key = bulkKey(fromMs, toMs);
-    const isLiveWin = (Date.now() - toMs) < 60e3;
-    if (key === evKey && !isLiveWin) return;   // immutable past window already loaded
+    const isLiveWin = Date.now() - toMs < 60e3;
+    if (key === evKey && !isLiveWin) return;
     evBusy = true;
     try {
       const evs = await dataLayer.events(fromMs, toMs);
-      const byMachine = new Map();
+      if (ctx.destroyed) return;
+      const byM = new Map();
       for (const e of evs) {
-        if (!byMachine.has(e.machine)) byMachine.set(e.machine, []);
-        byMachine.get(e.machine).push(e);
+        if (!byM.has(e.machine)) byM.set(e.machine, []);
+        byM.get(e.machine).push(e);
       }
-      for (const arr of byMachine.values()) arr.sort((a, b) => a.ts - b.ts);
-      ctx.events = byMachine;
+      for (const arr of byM.values()) arr.sort((a, b) => a.ts - b.ts);
+      ctx.events = byM;
       evKey = key;
-      persistSnapshot();   // refresh the device snapshot now that events are in
-    } catch (_) { /* leave prior events; cards degrade gracefully */ }
-    finally { evBusy = false; }
+      markDirty({ lanes: true, summary: true });
+    } catch {}
+    finally {
+      evBusy = false;
+    }
   }
 
-  // events for one machine whose ts falls inside [t0,t1] (ms)
-  function eventsInWindow(machineId, t0, t1) {
-    const arr = ctx.events && ctx.events.get(machineId);
-    if (!arr) return [];
-    return arr.filter((e) => e.ts >= t0 && e.ts <= t1);
+  // ---- Expanded Spindle Speed + Feed Override Trace Loader ----
+  async function loadMachineSeries(id) {
+    const { from, to } = windowSpan();
+    const effTo = Math.min(to, Date.now());
+    const cacheKey = `${id}|${bulkKey(from, effTo)}`;
+    const hit = ctx.seriesCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < 20_000) {
+      markDirty({ expand: true });
+      return;
+    }
+    try {
+      const [sspeed, fdovrd] = await Promise.all([
+        dataLayer.series(id, "sspeed", from, effTo, { buckets: 180 }),
+        dataLayer.series(id, "fdovrd", from, effTo, { buckets: 180 }),
+      ]);
+      if (ctx.destroyed) return;
+      ctx.seriesCache.set(cacheKey, { at: Date.now(), from, to: effTo, sspeed, fdovrd });
+      // Also store latest reference on lane for instant pan rendering
+      const lane = ctx.lanes.get(id);
+      if (lane) lane.series = { from, to: effTo, sspeed, fdovrd };
+      markDirty({ expand: true });
+    } catch {}
   }
 
+  function refreshExpandedSeries() {
+    for (const id of ctx.expanded) loadMachineSeries(id);
+  }
 
-  let liveBusy = false;
+  // ---- Bootstrap & Live 1Hz Tick ----
+  async function loadOverviewAndBoot(forceBuffer) {
+    const my = ++ctx.token;
+    paintWinLabel();
+    syncPresetBtns();
+    try {
+      const [ov, storeState] = await Promise.all([
+        dataLayer.overview(),
+        fleetStore.load().catch(() => fleetStore.getCached()),
+      ]);
+      if (ctx.destroyed || my !== ctx.token) return;
+      ctx.downtimeLogs = Array.isArray(storeState?.downtimeLogs) ? storeState.downtimeLogs : [];
+      const machines = (Array.isArray(ov.machines) ? ov.machines : []).map((m) => ({
+        id: m.machine_id,
+        name: m.machine_name || m.machine_id,
+        m,
+      }));
+      if (!machines.length) {
+        refs.note.textContent = "No machines reported by the collector.";
+        refs.note.hidden = false;
+        return;
+      }
+      if (ctx.wallOrder) {
+        const rank = {};
+        ctx.wallOrder.forEach((id, i) => { if (!(id in rank)) rank[id] = i; });
+        machines.sort((a, b) => (rank[a.id] ?? 1e9) - (rank[b.id] ?? 1e9));
+      }
+      ctx.machines = machines;
+      ctx.over = new Map(machines.map((x) => [x.id, x.m]));
+      if (ctx.sel) {
+        const liveIds = new Set(machines.map((m) => m.id));
+        ctx.sel = new Set([...ctx.sel].filter((id) => liveIds.has(id)));
+        if (!ctx.sel.size || ctx.sel.size === machines.length) ctx.sel = null;
+      }
+      buildFilterMenu();
+      syncVisibleLanes();
+      await loadBuffer(forceBuffer);
+    } catch (err) {
+      if (!ctx.machines.length) {
+        refs.note.textContent = "Collector unreachable — retrying…";
+        refs.note.hidden = false;
+      }
+    }
+  }
+
   async function liveTick() {
-    if (liveBusy) return;
-    if (!refs.grid.offsetParent) return; // tab not visible
+    if (liveBusy || ctx.destroyed || ctx.dragging) return;
+    if (!refs.board || !refs.board.offsetParent) return;
     liveBusy = true;
     try {
       const ov = await dataLayer.overview();
+      if (ctx.destroyed) return;
       ctx.over = new Map((ov.machines || []).map((m) => [m.machine_id, m]));
-      paintWinLabel();
-      repaint();
-    } catch (err) { 
-      // Live tick failure is non-fatal — keep last frame, but log for debugging
-      console.warn('[timeline] live tick failed:', err);
-    }
-    finally { liveBusy = false; }
-  }
-
-  // ---- rendering ----
-  // Lane height is dynamic: resize() grows it to fill the available viewport so
-  // the board never leaves a wasted empty band below the last machine. This is
-  // the floor (small screens / many machines fall back to scrolling at this H).
-  const LANE_MIN = 104;
-  ctx.laneH = LANE_MIN;
-  function resize() {
-    const w = refs.grid.querySelector(".tl-lane-canvas")?.clientWidth
-      || refs.axis.clientWidth || 600;
-    const dpr = window.devicePixelRatio || 1;
-
-    // Grow lanes to fill the viewport so no empty band is wasted below the last
-    // machine. Budget = space from the grid's top down to a small bottom margin,
-    // minus the sticky axis row and the inter-row gaps; split across all lanes.
-    const n = ctx.lanes.size || 1;
-    const gridTop = refs.grid.getBoundingClientRect().top;
-    const AXIS_ROW = 30, GRID_PAD = 26, ROW_GAP = 6, BOTTOM_MARGIN = 22;
-    const budget = window.innerHeight - gridTop - GRID_PAD - AXIS_ROW
-      - ROW_GAP * n - BOTTOM_MARGIN;
-    ctx.laneH = Math.max(LANE_MIN, Math.floor(budget / n));
-
-    const setup = (cv, h) => {
-      cv.width = Math.max(1, Math.round(w * dpr));
-      cv.height = Math.round(h * dpr);
-      const g = cv.getContext("2d");
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return g;
-    };
-    refs.axisG = setup(refs.axis, 26);
-    refs.axisW = w;
-    for (const lane of ctx.lanes.values()) {
-      lane.g = setup(lane.canvas, ctx.laneH);
-      lane.w = w;
-      lane.canvas.style.height = ctx.laneH + "px";
-      lane.label.style.height = ctx.laneH + "px";
-    }
-  }
-
-  function tickStep(span) {
-    // choose a human tick interval for the axis
-    const H = 3600e3, D = 86400e3;
-    if (span <= 2 * H) return { step: 15 * 60e3, fmt: clock };
-    if (span <= 8 * H) return { step: H, fmt: clock };
-    if (span <= 2 * D) return { step: 3 * H, fmt: clock };
-    if (span <= 9 * D) return { step: D, fmt: (ms) => dayLabel(ms).replace(/,.*/, "") };
-    return { step: 7 * D, fmt: (ms) => dayLabel(ms).replace(/,.*/, "") };
-  }
-
-  function paintAxis(from, to, span) {
-    const g = refs.axisG, w = refs.axisW; if (!g) return;
-    const light = isLight();
-    g.clearRect(0, 0, w, 26);
-    g.font = "11px ui-monospace, monospace";
-    g.textBaseline = "middle";
-    const { step, fmt } = tickStep(span);
-    const x = (ts) => ((ts - from) / span) * w;
-    let t = Math.ceil(from / step) * step;
-    for (; t <= to; t += step) {
-      const px = x(t);
-      g.strokeStyle = light ? "rgba(71,85,105,0.38)" : "rgba(148,163,184,0.42)";
-      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, 26); g.stroke();
-      g.fillStyle = light ? "rgba(51,65,85,0.95)" : "rgba(203,213,225,0.92)";
-      g.fillText(fmt(t), px + 4, 13);
-    }
-    // day boundary marker on the axis — red tick + date label, lined up with the
-    // full-height red divider painted across the lanes.
-    for (let d = istDayStart(from); d <= to; d += 86400e3) {
-      if (d < from) continue;
-      const px = x(d);
-      g.strokeStyle = "rgba(239,68,68,0.95)";
-      g.lineWidth = 2;
-      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, 26); g.stroke();
-      g.lineWidth = 1;
-      g.fillStyle = "rgba(239,68,68,0.95)";
-      g.font = "600 11px ui-monospace, monospace";
-      g.fillText(dayLabel(d).replace(/,.*/, ""), px + 5, 13);
-      g.font = "11px ui-monospace, monospace";
-    }
-    // NOW marker on the axis — yellow tick, only when "now" falls inside the view.
-    const nowMs = Date.now();
-    if (nowMs >= from && nowMs <= to) {
-      const px = x(nowMs);
-      g.strokeStyle = "rgba(250,204,21,0.95)";
-      g.lineWidth = 2;
-      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, 26); g.stroke();
-      g.lineWidth = 1;
-      g.fillStyle = "rgba(250,204,21,0.95)";
-      g.font = "600 11px ui-monospace, monospace";
-      g.fillText("NOW", px + 5, 13);
-      g.font = "11px ui-monospace, monospace";
-    }
-  }
-
-  // a stable-ish color per program name (so the same program reads the same
-  // across the day) — hashed hue, muted for a band background.
-  function progHue(name) {
-    if (!name) return 220;
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-    return h;
-  }
-
-  function paintLane(lane, from, to, span, id) {
-    const g = lane.g, w = lane.w, H = ctx.laneH; if (!g) return;
-    const light = isLight();
-    g.clearRect(0, 0, w, H);
-    const x = (ts) => ((ts - from) / span) * w;
-    const bandTop = 6, bandH = 20;          // program-group band (top, fixed)
-    const yTop = 34, hSeg = H - yTop - 8;   // part row grows to fill the lane
-    lane.rects = [];
-    lane.grects = [];
-
-    // ---- machine-state bands (additive background coverage from timeline_bulk) ----
-    // Painted FIRST so group bands + part segments draw over them. A lane with
-    // bands but zero parts still paints its idle/stopped windows — that is the
-    // fix. Missing/empty bands => this loop is a no-op (today's behavior).
-    // Colors reuse the lane status palette at ~25% alpha (see godmode.css vars).
-    const BAND_COL = {
-      running: "#34d399", idle: "#38bdf8", paused: "#f59e0b",
-      alarm: "#ef4444", offline: "#64748b", unknown: "#64748b",
-    };
-    const bands = lane.bands || [];
-    if (bands.length) {
-      g.save();
-      g.globalAlpha = 0.25;
-      for (const b of bands) {
-        if (!b || !Number.isFinite(b.t0) || !Number.isFinite(b.t1)) continue;
-        if (b.t1 < from || b.t0 > to) continue;
-        const x0 = Math.max(0, x(b.t0)), x1 = Math.min(w, x(b.t1));
-        const ww = Math.max(2, x1 - x0);
-        g.fillStyle = BAND_COL[b.status] || BAND_COL.unknown;
-        g.fillRect(x0, 0, ww, H);
-      }
-      g.restore();
-    }
-
-    // ---- program-group bands (one tinted strip per contiguous program run) ----
-    g.font = "600 11px ui-monospace, monospace";
-    g.textBaseline = "middle";
-    for (const grp of (lane.groups || [])) {
-      if (grp.t1 < from || grp.t0 > to) continue;
-      const x0 = Math.max(0, x(grp.t0)), x1 = Math.min(w, x(grp.t1));
-      const ww = Math.max(2, x1 - x0);
-      const hue = progHue(grp.program);
-      g.fillStyle = light ? `hsla(${hue}, 48%, 86%, 0.85)` : `hsla(${hue}, 55%, 55%, 0.16)`;
-      roundRect(g, x0, bandTop, ww, bandH, 3); g.fill();
-      g.strokeStyle = light ? `hsla(${hue}, 45%, 52%, 0.55)` : `hsla(${hue}, 60%, 62%, 0.5)`;
-      g.lineWidth = 1; roundRect(g, x0 + 0.5, bandTop + 0.5, ww - 1, bandH - 1, 3); g.stroke();
-      // label: program name + job count, if the band is wide enough
-      const label = `${(grp.program || "—").replace(/\.nc$/i, "")} · ${grp.count} job${grp.count === 1 ? "" : "s"}`;
-      if (ww > 60) {
-        g.save();
-        g.beginPath(); g.rect(x0 + 4, bandTop, ww - 8, bandH); g.clip();
-        g.fillStyle = light ? `hsla(${hue}, 60%, 26%, 0.95)` : `hsla(${hue}, 70%, 82%, 0.95)`;
-        g.fillText(label, x0 + 6, bandTop + bandH / 2 + 1);
-        g.restore();
-      }
-      lane.grects.push({ x0, x1: x0 + ww, grp, y0: bandTop, y1: bandTop + bandH });
-    }
-
-    const COL = {
-      normal: "#34d399", high: "#f59e0b", over: "#ef4444",
-      low: "#38bdf8", neutral: "#64748b", partial: "#5b6b82",
-    };
-    for (const p of lane.parts) {
-      if (p.t1 < from || p.t0 > to) continue;
-      const x0 = Math.max(0, x(p.t0)), x1 = Math.min(w, x(p.t1));
-      const ww = Math.max(2, x1 - x0);
-      const kind = partColor(p);
-      g.fillStyle = COL[kind];
-      g.globalAlpha = p.partial ? 0.5 : 0.92;
-      roundRect(g, x0, yTop, ww, hSeg, 3); g.fill();
-      g.globalAlpha = 1;
-      // job number centered when the segment is wide enough to read
-      if (ww > 18 && p.job != null) {
-        g.fillStyle = "rgba(8,12,20,0.82)";
-        g.font = "600 13px ui-monospace, monospace";
-        g.textAlign = "center";
-        g.fillText(String(p.job), x0 + ww / 2, yTop + hSeg / 2 + 1);
-        g.textAlign = "left";
-      }
-      lane.rects.push({ x0, x1: x0 + ww, p, no: p.job, kind });
-    }
-
-    // live edge: current in-progress part from overview (only when window holds "now")
-    const m = ctx.over.get(id);
-    if (m && to >= Date.now() - 2000) {
-      const elapsed = Number(m.cycle && m.cycle.this_cycle);
-      const active = String(m.execution).toUpperCase() === "ACTIVE";
-      if (Number.isFinite(elapsed) && elapsed > 0) {
-        const now = Date.now();
-        const t0 = now - elapsed * 1000;
-        const x0 = Math.max(0, x(t0)), x1 = Math.min(w, x(now));
-        const ww = Math.max(2, x1 - x0);
-        g.save();
-        g.fillStyle = active ? lane.tint : "#64748b";
-        g.globalAlpha = active ? (0.55 + 0.35 * Math.abs(Math.sin(now / 600))) : 0.4;
-        roundRect(g, x0, yTop, ww, hSeg, 3); g.fill();
-        g.globalAlpha = 1;
-        // leading tick
-        g.strokeStyle = active ? lane.tint : "#94a3b8";
-        g.lineWidth = 2;
-        g.beginPath(); g.moveTo(x1, yTop - 2); g.lineTo(x1, yTop + hSeg + 2); g.stroke();
-        g.restore();
-        lane.rects.push({ x0, x1: x0 + ww, live: true, m, no: "live" });
-      }
-    }
-
-    // gridlines OVERLAID on top of the bars (drawn last) so the time ticks stay
-    // visible even where green segments would otherwise paint right over them.
-    // A subtle dark line under a light one gives contrast on both bars and gaps.
-    const { step } = tickStep(span);
-    let gt = Math.ceil(from / step) * step;
-    for (; gt <= to; gt += step) {
-      const px = Math.round(x(gt)) + 0.5;
-      g.lineWidth = 1;
-      g.strokeStyle = "rgba(8,12,20,0.30)";          // dark base for contrast on bars
-      g.beginPath(); g.moveTo(px, yTop - 2); g.lineTo(px, H); g.stroke();
-      g.strokeStyle = light ? "rgba(30,41,59,0.45)" : "rgba(226,232,240,0.45)";
-      g.setLineDash([3, 4]);
-      g.beginPath(); g.moveTo(px, yTop - 2); g.lineTo(px, H); g.stroke();
-      g.setLineDash([]);
-    }
-
-    // DAY BOUNDARY — a solid red line at every 00:00 IST, full lane height, no
-    // gaps (so each calendar day reads as a hard divider on the board).
-    for (let d = istDayStart(from); d <= to; d += 86400e3) {
-      if (d < from) continue;
-      const px = Math.round(x(d)) + 0.5;
-      g.strokeStyle = "rgba(239,68,68,0.95)";
-      g.lineWidth = 2;
-      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
-    }
-
-    // NOW marker — a solid yellow line at the present moment, full lane height,
-    // only when "now" is inside the visible window (so scrolling forward shows
-    // empty future space to the right of it).
-    const nowMs = Date.now();
-    if (nowMs >= from && nowMs <= to) {
-      const px = Math.round(x(nowMs)) + 0.5;
-      g.strokeStyle = "rgba(250,204,21,0.95)";
-      g.lineWidth = 2;
-      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
-    }
-    // lane status dot — one indicator only: machine online vs offline
-    const mo = ctx.over.get(id);
-    if (mo) {
-      const st = String(mo.status || "").toLowerCase();
-      const offline = mo.online === false || st === "offline" || st === "unavailable";
-      lane.dot.className = `tl-dot st-${offline ? "offline" : "online"}`;
-    }
-  }
-
-  function repaint() {
-    const { from, to, span } = windowSpan();
-    paintAxis(from, to, span);
-    for (const [id, lane] of ctx.lanes) paintLane(lane, from, to, span, id);
-  }
-
-  // ---- rich detail cards (program-group + single-job) ----
-  // All numbers below come from real part t0/t1/dur/dev + real /api/events.
-
-  const escTip = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  const escAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-  // a sparkline of per-job durations; bars colored by deviation band (same hues
-  // as the lane segments). Pure inline HTML — no extra canvas to tear down.
-  function sparkBars(parts) {
-    const done = parts.filter((p) => !p.partial && p.dur > 0);
-    if (!done.length) return "";
-    const max = Math.max(...done.map((p) => p.dur));
-    const cls = (p) => {
-      if (p.dev == null) return "n";
-      if (p.dev > 1 + WIDE) return "over";
-      if (p.dev > 1 + NORMAL) return "high";
-      if (p.dev < 1 - NORMAL) return "low";
-      return "ok";
-    };
-    const bars = done.slice(-48).map((p) =>
-      `<i class="sb-${cls(p)}" style="height:${Math.max(6, Math.round((p.dur / max) * 100))}%"></i>`
-    ).join("");
-    return `<div class="tl-spark">${bars}</div>`;
-  }
-
-  // run-time split bar: cutting (sum of part durations) vs idle (the gaps).
-  function splitBar(cuttingMs, idleMs) {
-    const tot = cuttingMs + idleMs;
-    if (tot <= 0) return "";
-    const cutPct = Math.max(2, Math.round((cuttingMs / tot) * 100));
-    return `<div class="tl-split"><span class="cut" style="flex:${cutPct}"></span><span class="idle" style="flex:${100 - cutPct}"></span></div>
-      <div class="tl-split-legend"><span class="cut">cutting ${dur(cuttingMs)}</span><span class="idle">idle ${dur(idleMs)}</span></div>`;
-  }
-
-  // render the real incidents (estop/override) inside a [t0,t1] window
-  function incidentsHtml(id, t0, t1, { compact = false } = {}) {
-    const evs = eventsInWindow(id, t0, t1);
-    if (!evs.length) return `<div class="tl-card-sec"><div class="tl-sec-h">what happened</div><div class="tl-clean">✓ clean — no e-stops or override dips</div></div>`;
-    const estops = evs.filter((e) => e.rule === "estop").length;
-    const ovr = evs.filter((e) => e.rule === "override").length;
-    const summary = [estops ? `${estops} e-stop${estops > 1 ? "s" : ""}` : "", ovr ? `${ovr} override dip${ovr > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
-    const rows = (compact ? evs : evs.slice(0, 6)).map((e) => {
-      const sev = e.rule === "estop" ? "ev-crit" : "ev-warn";
-      return `<div class="tl-ev ${sev}"><span class="tl-ev-dot"></span><span class="tl-ev-t">${clockS(e.ts)}</span><span class="tl-ev-m">${escTip(e.msg || e.rule)}</span></div>`;
-    }).join("");
-    const more = !compact && evs.length > 6 ? `<div class="tl-tip-dim">+${evs.length - 6} more</div>` : "";
-    return `<div class="tl-card-sec"><div class="tl-sec-h">what happened · ${summary}</div>${rows}${more}</div>`;
-  }
-
-  function buildGroupCard(lane, id, grp) {
-    const parts = (lane.parts || []).filter((p) => p.groupId === grp.groupId);
-    const done = parts.filter((p) => !p.partial);
-    const durs = done.map((p) => p.dur).filter((d) => d > 0);
-    const cuttingMs = parts.reduce((a, p) => a + (p.dur || 0), 0);
-    const wallMs = grp.t1 - grp.t0;
-    const idleMs = Math.max(0, wallMs - cuttingMs);
-    const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null;
-    const base = grp.baseline;
-    const judged = done.filter((p) => p.dev != null);
-    const inNorm = judged.filter((p) => Math.abs(p.dev - 1) <= NORMAL).length;
-    const slow = judged.filter((p) => p.dev > 1 + NORMAL).length;
-    const short = judged.filter((p) => p.dev < 1 - NORMAL).length;
-    const qPct = judged.length ? Math.round((inNorm / judged.length) * 100) : null;
-    const qCls = qPct == null ? "" : qPct >= 90 ? "q-good" : qPct >= 70 ? "q-mid" : "q-bad";
-
-    // Composite program score (top-right badge). Honest, from real signals:
-    //   utilization = cutting time / wall-clock run time (how much of the run
-    //                 was actually cutting vs idle gaps)
-    //   quality     = jobs within ±15% of learned baseline / judged jobs
-    //   incidents   = small penalty per real event (estop hits harder)
-    // score = util × quality × incidentFactor, clamped 0–100. All inputs shown
-    // below the badge so the number is never a black box.
-    const utilPct = wallMs > 0 ? Math.round((cuttingMs / wallMs) * 100) : null;
-    const evs = eventsInWindow(id, grp.t0, grp.t1);
-    const estops = evs.filter((e) => e.rule === "estop").length;
-    const ovrDips = evs.filter((e) => e.rule === "override").length;
-    let score = null, scoreCls = "";
-    if (utilPct != null && qPct != null) {
-      const incidentFactor = Math.max(0.6, 1 - (estops * 0.08 + ovrDips * 0.01));
-      score = Math.round(Math.min(100, (utilPct / 100) * (qPct / 100) * incidentFactor * 100));
-      scoreCls = score >= 85 ? "sc-good" : score >= 65 ? "sc-mid" : "sc-bad";
-    }
-    const scoreBadge = score != null
-      ? `<div class="tl-score ${scoreCls}" title="utilization ${utilPct}% × cycle-quality ${qPct}%${estops || ovrDips ? ` − incidents` : ""}"><span class="tl-score-n">${score}</span><span class="tl-score-u">score</span></div>`
-      : "";
-    return `
-      <div class="tl-card-head">
-        ${scoreBadge}
-        <b>${escTip((grp.program || "—").replace(/\.nc$/i, ""))}</b>
-        <div class="tl-tip-row">program group · ${grp.count} job${grp.count === 1 ? "" : "s"}</div>
-      </div>
-      ${score != null ? `<div class="tl-card-sec tl-score-break">
-        <div class="tl-kv"><span>utilization</span><span class="${utilPct >= 80 ? "q-good" : utilPct >= 55 ? "q-mid" : "q-bad"}">${utilPct}%</span></div>
-        <div class="tl-kv"><span>cycle quality</span><span class="${qCls}">${qPct}%</span></div>
-        ${estops || ovrDips ? `<div class="tl-kv"><span>incidents</span><span class="q-mid">${estops ? estops + " e-stop · " : ""}${ovrDips} dip${ovrDips === 1 ? "" : "s"}</span></div>` : `<div class="tl-kv"><span>incidents</span><span class="q-good">none</span></div>`}
-      </div>` : ""}
-      <div class="tl-card-sec">
-        <div class="tl-kv"><span>started</span><span>${clockS(grp.t0)}</span></div>
-        <div class="tl-kv"><span>ended</span><span>${clockS(grp.t1)}</span></div>
-        <div class="tl-kv"><span>run time</span><span>${dur(wallMs)}</span></div>
-      </div>
-      <div class="tl-card-sec">
-        <div class="tl-sec-h">run-time split</div>
-        ${splitBar(cuttingMs, idleMs)}
-      </div>
-      <div class="tl-card-sec">
-        <div class="tl-sec-h">per-job duration</div>
-        ${sparkBars(parts) || '<div class="tl-tip-dim">no completed jobs yet</div>'}
-        ${avg ? `<div class="tl-kv"><span>avg / job</span><span>${dur(avg)}</span></div>` : ""}
-        ${base ? `<div class="tl-kv"><span>usual / job</span><span>${dur(base * 1000)} <span class="tl-tip-dim">n=${grp.baselineN}</span></span></div>` : `<div class="tl-tip-dim">no baseline yet (need ≥5 cycles)</div>`}
-      </div>
-      ${judged.length ? `<div class="tl-card-sec"><div class="tl-sec-h">cycle-time quality</div>
-        <div class="tl-q ${qCls}"><b>${inNorm}/${judged.length}</b> normal${qPct != null ? ` · ${qPct}%` : ""}</div>
-        <div class="tl-tip-dim">${slow ? `${slow} slow` : ""}${slow && short ? " · " : ""}${short ? `${short} short` : ""}${!slow && !short ? "all within ±15% of usual" : ""}</div></div>` : ""}
-      ${incidentsHtml(id, grp.t0, grp.t1)}`;
-  }
-
-  function buildJobCard(lane, id, p, pinned) {
-    const grp = (lane.groups || []).find((gg) => gg.groupId === p.groupId);
-    const prog = (p.program || "—").replace(/\.nc$/i, "");
-    let verdict = "";
-    if (p.dev != null && !p.partial) {
-      const pct = Math.round((p.dev - 1) * 100);
-      const secs = Math.round(p.dur / 1000 - p.baseline);
-      if (p.dev > 1 + WIDE) verdict = `<div class="tl-q q-bad"><b>+${pct}%</b> slower than usual (${secs > 0 ? "+" : ""}${secs}s)</div>`;
-      else if (p.dev > 1 + NORMAL) verdict = `<div class="tl-q q-mid"><b>+${pct}%</b> mildly slow</div>`;
-      else if (p.dev < 1 - NORMAL) verdict = `<div class="tl-q q-mid"><b>${pct}%</b> shorter than usual</div>`;
-      else verdict = `<div class="tl-q q-good"><b>normal</b> (${pct >= 0 ? "+" : ""}${pct}%)</div>`;
-    }
-    return `
-      <div class="tl-card-head">
-        <b>${escTip(prog)} · job ${p.job ?? "—"}${grp ? " / " + grp.count : ""}${p.partial ? " (partial)" : ""}</b>
-        <div class="tl-tip-row">part in program group${pinned ? " · pinned" : ""}</div>
-      </div>
-      <div class="tl-card-sec">
-        <div class="tl-kv"><span>started</span><span>${clockS(p.t0)}</span></div>
-        <div class="tl-kv"><span>ended</span><span>${clockS(p.t1)}</span></div>
-        <div class="tl-kv"><span>duration</span><span>${dur(p.dur)}</span></div>
-        ${p.baseline ? `<div class="tl-kv"><span>usual</span><span>${dur(p.baseline * 1000)} <span class="tl-tip-dim">n=${p.baselineN}</span></span></div>` : (p.partial ? "" : `<div class="tl-tip-dim">no baseline yet</div>`)}
-      </div>
-      ${verdict ? `<div class="tl-card-sec"><div class="tl-sec-h">cycle-time quality</div>${verdict}</div>` : ""}
-      ${incidentsHtml(id, p.t0, p.t1, { compact: true })}`;
-  }
-
-  // position the tip card near the cursor, never spilling off the viewport AND
-  // never covering the sticky top nav. Horizontal: prefer right of the cursor,
-  // flip left if it would overflow. Vertical: center on the cursor, but clamp
-  // the top to just below the nav bar (so the popup sits BEHIND/below the nav,
-  // never over it) and the bottom to the viewport.
-  function placeTip(clientX, clientY) {
-    const wrap = body.querySelector(".tl-wrap");
-    const wrapRect = wrap.getBoundingClientRect();
-    const card = refs.tip.getBoundingClientRect();
-    const cardW = card.width || 300;
-    const cardH = card.height || 240;
-    const GAP = 14, MARGIN = 10;
-    const vw = window.innerWidth, vh = window.innerHeight;
-
-    // top boundary = bottom of the sticky nav bar (+ small gap), so the card
-    // can never overlap the navigation.
-    const nav = document.querySelector(".godnav");
-    const topBound = (nav ? nav.getBoundingClientRect().bottom : 0) + 6;
-
-    // horizontal: right of cursor, flip left on overflow, clamp
-    let vx = clientX + GAP;
-    if (vx + cardW > vw - MARGIN) vx = clientX - cardW - GAP;
-    if (vx < MARGIN) vx = MARGIN;
-
-    // vertical: center on cursor, then clamp between the nav bottom and viewport
-    let vy = clientY - cardH / 2;
-    const maxY = vh - cardH - MARGIN;
-    if (vy > maxY) vy = maxY;
-    if (vy < topBound) vy = topBound;
-
-    refs.tip.style.left = `${vx - wrapRect.left}px`;
-    refs.tip.style.top = `${vy - wrapRect.top}px`;
-  }
-
-  function onHover(e, id) {
-    if (ctx.dragging) return;          // panning: no hovercard
-    if (ctx.pinned) return;            // a job card is pinned — don't fight it
-    const lane = ctx.lanes.get(id); if (!lane) return;
-    const rect = lane.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    let html = null;
-
-    // top strip → program-group detail
-    if (my <= 28 && lane.grects) {
-      const gh = lane.grects.find((r) => mx >= r.x0 && mx <= r.x1 && my >= r.y0 - 4 && my <= r.y1 + 4);
-      if (gh) html = buildGroupCard(lane, id, gh.grp);
-    }
-
-    // part row → job preview (hover) — click pins it (see attachPan/onClick)
-    if (!html) {
-      const hit = (lane.rects || []).find((r) => mx >= r.x0 && mx <= r.x1);
-      if (!hit) { refs.tip.hidden = true; return; }
-      if (hit.live) {
-        const c = hit.m.cycle || {};
-        const last = Number(c.last_cycle);
-        const prog = hit.m.active_program ? String(hit.m.active_program).replace(/\.nc$/i, "") : "—";
-        html = `<div class="tl-card-head"><b>Live part — in progress</b><div class="tl-tip-row">${escTip(prog)}</div></div>
-          <div class="tl-card-sec">
-            <div class="tl-kv"><span>started</span><span>${clockS(Date.now() - Number(c.this_cycle) * 1000)}</span></div>
-            <div class="tl-kv"><span>elapsed</span><span>${dur(Number(c.this_cycle) * 1000)}</span></div>
-            ${Number.isFinite(c.remaining_cycle_time) ? `<div class="tl-kv"><span>remaining</span><span>${dur(Number(c.remaining_cycle_time) * 1000)}</span></div>` : ""}
-            ${Number.isFinite(last) && last > 0 ? `<div class="tl-kv"><span>last cycle</span><span>${dur(last * 1000)}</span></div>` : ""}
-          </div>`;
+      if (ctx.live) {
+        paintWinLabel();
+        markDirty({ axis: true, lanes: true, minimap: true, summary: true, expand: ctx.expanded.size > 0 });
       } else {
-        html = buildJobCard(lane, id, hit.p, false);
+        // Even when viewing history, keep gutter live states updated
+        markDirty({ summary: true });
       }
+    } catch {}
+    finally {
+      liveBusy = false;
     }
-
-    refs.tip.className = "tl-tip tl-card";
-    refs.tip.innerHTML = html;
-    refs.tip.hidden = false;
-    placeTip(e.clientX, e.clientY);
   }
 
-  // click → pin the card under the cursor (program band OR job). Click empty
-  // track or the × closes it. Pinned cards stay put so you can read / mouse to
-  // them — the fix for "cannot pin" + cards hiding off the bottom of the page.
-  function onClick(e, id) {
-    if (ctx.dragging) return;
-    const lane = ctx.lanes.get(id); if (!lane) return;
-    const rect = lane.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-
-    // program-band click → pin the group card
-    if (my <= 28 && lane.grects) {
-      const gh = lane.grects.find((r) => mx >= r.x0 && mx <= r.x1 && my >= r.y0 - 4 && my <= r.y1 + 4);
-      if (gh) {
-        ctx.pinned = { id, kind: "group", grp: gh.grp };
-        renderPinned(buildGroupCard(lane, id, gh.grp), e);
-        return;
-      }
-    }
-    // part-row click → pin the job card
-    const hit = (lane.rects || []).find((r) => mx >= r.x0 && mx <= r.x1 && !r.live);
-    if (!hit) { unpin(); return; }
-    ctx.pinned = { id, kind: "job", p: hit.p };
-    renderPinned(buildJobCard(lane, id, hit.p, true), e);
-  }
-  // shared pinned-card render: adds the × close button + wires it
-  function renderPinned(innerHtml, e) {
-    refs.tip.className = "tl-tip tl-card is-pinned";
-    refs.tip.innerHTML = `<button class="tl-card-x" data-f="cardX" title="close">×</button>` + innerHtml;
-    refs.tip.hidden = false;
-    placeTip(e.clientX, e.clientY);
-    const x = refs.tip.querySelector('[data-f="cardX"]');
-    if (x) x.addEventListener("click", (ev) => { ev.stopPropagation(); unpin(); });
-  }
-  function unpin() {
-    if (!ctx.pinned) return;
-    ctx.pinned = null;
-    refs.tip.hidden = true;
-    refs.tip.className = "tl-tip tl-card";
-  }
-
-  // resize handling + animation for the live pulse
-  const onResize = () => { resize(); repaint(); };
-  window.addEventListener("resize", onResize);
-  // The only thing moving between data ticks is the live-edge pulse, so a full
-  // 60 fps repaint of every lane is wasteful. Throttle the pulse repaint to
-  // ~8 fps — visually smooth for a breathing highlight, ~7x less canvas work.
-  const PULSE_MS = 120;
-  let lastPulse = 0;
-  function animate(now) {
-    ctx.raf = requestAnimationFrame(animate);
-    if (!refs.grid.offsetParent || !ctx.live) return;
-    if (now - lastPulse < PULSE_MS) return;
-    lastPulse = now;
-    repaint();
-  }
-
-  // Paint the device-persisted snapshot immediately (no network). Builds the
-  // machine lanes + their parts/groups from localStorage and seeds the in-memory
-  // caches, so a cold reload shows the last board in <50ms instead of a 5s wait.
-  // loadRange() then runs and silently replaces this with fresh data.
+  // ---- Snapshot Hydration ----
   function hydrateFromSnapshot() {
     const snap = loadSnapshot();
     if (!snap) return;
     try {
       ctx.machines = snap.machines.map((m) => ({ id: m.id, name: m.name }));
-      // restore window anchor only if it was a non-live (frozen) view
-      let vidx = 0;
       for (const m of snap.machines) {
-        const data = snap.data && snap.data[m.id];
-        // pre-bands snapshots have no `bands` — default to [] (today's behavior)
-        if (data) {
-          if (!Array.isArray(data.bands)) data.bands = [];
-          ctx.dataCache.set(m.id, data);
-        }
-        if (isVisible(m.id)) {
-          const lane = ensureLane(m.id, m.name, vidx++);
-          lane.nameEl.textContent = m.name;
-          if (data) { lane.parts = data.parts || []; lane.groups = data.groups || []; lane.bands = data.bands || []; lane.truncated = data.truncated; }
-        }
+        const d = snap.data && snap.data[m.id];
+        if (d) ctx.dataCache.set(m.id, { parts: d.parts || [], groups: d.groups || [], bands: d.bands || [], truncated: !!d.truncated });
       }
       if (snap.events) {
-        const evMap = new Map();
-        for (const [mid, arr] of Object.entries(snap.events)) evMap.set(mid, arr);
-        ctx.events = evMap;
+        const evM = new Map();
+        for (const [mid, arr] of Object.entries(snap.events)) evM.set(mid, arr);
+        ctx.events = evM;
       }
       if (snap.cover && snap.cover.from && snap.cover.to) {
         ctx.cover = { from: snap.cover.from, to: snap.cover.to, has: true };
-        ctx.buf = { from: snap.cover.from, to: snap.cover.to, loaded: true };
+        ctx.bufLoaded = true;
       }
       buildFilterMenu();
-      paintWinLabel();
-      syncRangeBtns();
-      resize();
-      repaint();
+      syncVisibleLanes();
       refs.note.hidden = true;
-    } catch (_) { /* corrupt snapshot — ignore, loadRange will populate */ }
+    } catch {}
   }
 
-  // Persist the current board to the device. Called after every fresh bulk fetch
-  // so the next cold reload has something instant to paint. We store only the
-  // visible-window-relevant fields (compact) and cap total size in saveSnapshot.
   function persistSnapshot() {
     try {
       const data = {};
       for (const { id } of ctx.machines) {
         const d = ctx.dataCache.get(id);
-        if (d) data[id] = { parts: d.parts, groups: d.groups, bands: d.bands || [], truncated: d.truncated };
+        if (d) data[id] = { parts: d.parts, groups: d.groups, bands: d.bands, truncated: d.truncated };
       }
       const events = {};
-      if (ctx.events) for (const [mid, arr] of ctx.events) events[mid] = arr;
+      for (const [mid, arr] of ctx.events) events[mid] = arr;
       saveSnapshot({
         savedAt: Date.now(),
-        rangeKey: ctx.rangeKey,
         cover: ctx.cover.has ? { from: ctx.cover.from, to: ctx.cover.to } : null,
         machines: ctx.machines.map((m) => ({ id: m.id, name: m.name })),
-        data, events,
+        data,
+        events,
       });
-    } catch (_) { /* non-fatal */ }
+    } catch {}
   }
 
-  // boot — hydrate from the device snapshot FIRST so a cold reload paints the
-  // last-known board instantly, then loadRange refreshes it from the network.
-  hydrateFromSnapshot();
-  loadRange(true).then(() => { resize(); repaint(); });
-  ctx.liveTimer = setInterval(liveTick, 1000);
-  ctx.raf = requestAnimationFrame(animate);
+  // ==================== RENDERING ENGINE (DIRTY-FLAGGED) ====================
 
-  // repaint canvases when the global theme toggles (canvas can't read CSS vars)
-  const onTheme = () => { if (refs.grid && refs.grid.offsetParent) repaint(); };
+  function tickStep(span) {
+    const M = 60e3;
+    const H = 3600e3;
+    const D = 86400e3;
+    if (span <= 45 * M) return { step: 5 * M, fmt: fmtClockIST };
+    if (span <= 2 * H) return { step: 15 * M, fmt: fmtClockIST };
+    if (span <= 6 * H) return { step: 30 * M, fmt: fmtClockIST };
+    if (span <= 14 * H) return { step: H, fmt: fmtClockIST };
+    if (span <= 2 * D) return { step: 3 * H, fmt: fmtClockIST };
+    if (span <= 9 * D) return { step: D, fmt: (ms) => fmtDayIST(ms).replace(/,.*/, "") };
+    return { step: 7 * D, fmt: (ms) => fmtDayIST(ms).replace(/,.*/, "") };
+  }
+
+  function getOfflinePattern(g, light) {
+    if (light && offlinePatternLight) return offlinePatternLight;
+    if (!light && offlinePatternDark) return offlinePatternDark;
+    const p = document.createElement("canvas");
+    p.width = 10;
+    p.height = 10;
+    const pg = p.getContext("2d");
+    pg.fillStyle = light ? "rgba(148,163,184,0.14)" : "rgba(100,116,139,0.16)";
+    pg.fillRect(0, 0, 10, 10);
+    pg.strokeStyle = light ? "rgba(100,116,139,0.28)" : "rgba(148,163,184,0.24)";
+    pg.lineWidth = 1.5;
+    pg.beginPath();
+    pg.moveTo(-2, 10);
+    pg.lineTo(10, -2);
+    pg.moveTo(4, 12);
+    pg.lineTo(12, 4);
+    pg.stroke();
+    const pat = g.createPattern(p, "repeat");
+    if (light) offlinePatternLight = pat;
+    else offlinePatternDark = pat;
+    return pat;
+  }
+
+  function paintAxis(from, to, span) {
+    const g = refs.axisG;
+    const w = ctx.trackW;
+    if (!g || !w) return;
+    const light = isLightTheme();
+    g.clearRect(0, 0, w, 30);
+    const x = (ts) => ((ts - from) / span) * w;
+
+    // Regular time ticks
+    const { step, fmt } = tickStep(span);
+    g.font = "11px ui-monospace, monospace";
+    g.textBaseline = "middle";
+    let t = Math.ceil(from / step) * step;
+    let lastLabelX = -100;
+    for (; t <= to; t += step) {
+      const px = Math.round(x(t)) + 0.5;
+      g.strokeStyle = light ? "rgba(15,23,42,0.14)" : "rgba(255,255,255,0.13)";
+      g.beginPath();
+      g.moveTo(px, 18);
+      g.lineTo(px, 30);
+      g.stroke();
+      if (px - lastLabelX >= 52 && px < w - 34) {
+        g.fillStyle = light ? "#475569" : "#94a3b8";
+        g.fillText(fmt(t), px + 4, 12);
+        lastLabelX = px;
+      }
+    }
+
+    // IST Shift handover tags (S1 06:00, S2 14:00, S3 22:00) when span <= 3 days
+    if (span <= 3 * 86400e3) {
+      const shifts = computeShiftBoundaries(from, to);
+      for (const s of shifts) {
+        const px = Math.round(x(s.ts)) + 0.5;
+        g.strokeStyle = light ? "rgba(109,40,217,0.45)" : "rgba(139,92,246,0.55)";
+        g.beginPath();
+        g.moveTo(px, 0);
+        g.lineTo(px, 30);
+        g.stroke();
+        g.fillStyle = light ? "#6d28d9" : "#a78bfa";
+        g.font = "700 10px ui-monospace, monospace";
+        g.fillText(s.code, px + 4, 23);
+      }
+    }
+
+    // Midnight IST day boundaries
+    for (const d of computeIstDayBoundaries(from, to)) {
+      const px = Math.round(x(d)) + 0.5;
+      g.strokeStyle = light ? "#dc2626" : "#f43f5e";
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(px, 0);
+      g.lineTo(px, 30);
+      g.stroke();
+      g.lineWidth = 1;
+      g.fillStyle = light ? "#dc2626" : "#fb7185";
+      g.font = "700 10.5px ui-monospace, monospace";
+      g.fillText(fmtDayIST(d).replace(/,.*/, ""), px + 5, 11);
+    }
+
+    // NOW obsidian pill marker on ruler
+    const nowMs = Date.now();
+    if (nowMs >= from && nowMs <= to) {
+      const px = Math.round(x(nowMs));
+      g.strokeStyle = "#f59e0b";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(px, 0);
+      g.lineTo(px, 30);
+      g.stroke();
+      g.lineWidth = 1;
+      const chipW = 36;
+      const chipX = Math.max(2, Math.min(w - chipW - 2, px - chipW / 2));
+      g.fillStyle = "#0a0d14";
+      roundRect(g, chipX, 4, chipW, 18, 5);
+      g.fill();
+      g.fillStyle = "#fbbf24";
+      g.font = "700 10px ui-monospace, monospace";
+      g.textAlign = "center";
+      g.fillText("NOW", chipX + chipW / 2, 14);
+      g.textAlign = "left";
+    }
+  }
+
+  function paintLane(lane, from, to, span, shifts, days) {
+    const g = lane.g;
+    const w = ctx.trackW;
+    const H = ctx.laneH;
+    if (!g || !w) return;
+
+    const light = isLightTheme();
+    g.clearRect(0, 0, w, H);
+    const x = (ts) => ((ts - from) / span) * w;
+
+    // Clean 2-strata track geometry:
+    //   Top rail (y: 4..18)   -> program run strip + event pins
+    //   Main track (y: 22..H-6) -> crisp state gaps + part cycle bars
+    const railY = 4;
+    const railH = 14;
+    const barY = 22;
+    const barH = Math.max(20, H - barY - 6);
+
+    lane.hitParts = [];
+    lane.hitGroups = [];
+    lane.hitGaps = [];
+    lane.hitPins = [];
+
+    // Subtle track groove
+    g.fillStyle = light ? "#f8fafc" : "rgba(255,255,255,0.025)";
+    roundRect(g, 0, barY, w, barH, 6);
+    g.fill();
+
+    // Subtle vertical time gridlines
+    const { step } = tickStep(span);
+    let gt = Math.ceil(from / step) * step;
+    g.strokeStyle = light ? "rgba(15,23,42,0.055)" : "rgba(255,255,255,0.055)";
+    g.lineWidth = 1;
+    for (; gt <= to; gt += step) {
+      const px = Math.round(x(gt)) + 0.5;
+      g.beginPath();
+      g.moveTo(px, 0);
+      g.lineTo(px, H);
+      g.stroke();
+    }
+
+    // Shade future zone cleanly past NOW
+    const nowMs = Date.now();
+    if (nowMs < to) {
+      const nx = Math.max(0, x(nowMs));
+      g.fillStyle = light ? "rgba(15,23,42,0.025)" : "rgba(255,255,255,0.02)";
+      g.fillRect(nx, 0, Math.max(0, w - nx), H);
+    }
+
+    // 1. Inspectable Non-Cutting Gaps inside the main bar track
+    const mEvents = ctx.events.get(lane.id) || [];
+    const gaps = extractLaneGaps(lane.id, lane.bands, lane.parts, from, Math.min(to, nowMs), ctx.downtimeLogs, mEvents);
+    const GAP_FILL = light
+      ? {
+          idle: "rgba(148,163,184,0.22)",
+          paused: "rgba(245,158,11,0.22)",
+          alarm: "rgba(239,68,68,0.24)",
+          unknown: "rgba(148,163,184,0.18)",
+        }
+      : {
+          idle: "rgba(148,163,184,0.16)",
+          paused: "rgba(245,158,11,0.24)",
+          alarm: "rgba(244,63,94,0.26)",
+          unknown: "rgba(148,163,184,0.14)",
+        };
+    const GAP_STROKE = {
+      idle: light ? "rgba(100,116,139,0.28)" : "rgba(148,163,184,0.25)",
+      paused: light ? "rgba(217,119,6,0.55)" : "rgba(245,158,11,0.55)",
+      alarm: light ? "rgba(220,38,38,0.62)" : "rgba(244,63,94,0.68)",
+      offline: light ? "rgba(100,116,139,0.35)" : "rgba(148,163,184,0.30)",
+    };
+
+    for (const gap of gaps) {
+      const x0 = Math.max(0, x(gap.t0));
+      const x1 = Math.min(w, x(gap.t1));
+      const ww = Math.max(3, x1 - x0);
+      if (gap.status === "offline") {
+        g.fillStyle = getOfflinePattern(g, light);
+      } else {
+        g.fillStyle = GAP_FILL[gap.status] || GAP_FILL.idle;
+      }
+      roundRect(g, x0 + 0.5, barY + 1, Math.max(2, ww - 1), barH - 2, 4);
+      g.fill();
+      g.strokeStyle = GAP_STROKE[gap.status] || GAP_STROKE.idle;
+      g.lineWidth = 1;
+      g.stroke();
+
+      // If downtime reason is logged, stamp a crisp cobalt accounted dot + label if wide enough
+      if (gap.logged) {
+        g.fillStyle = light ? "#2563eb" : "#60a5fa";
+        g.beginPath();
+        g.arc(x0 + Math.min(ww / 2, 7), barY + 7, 3, 0, Math.PI * 2);
+        g.fill();
+        if (ww > 66) {
+          g.save();
+          g.beginPath();
+          g.rect(x0 + 12, barY, ww - 15, barH);
+          g.clip();
+          g.font = "600 10.5px var(--font-body), sans-serif";
+          g.textBaseline = "middle";
+          g.fillStyle = light ? "#1e3a8a" : "#bfdbfe";
+          g.fillText(gap.logged.reason, x0 + 13, barY + barH / 2);
+          g.restore();
+        }
+      } else if (gap.status === "offline" && ww > 54) {
+        g.save();
+        g.beginPath();
+        g.rect(x0 + 4, barY, ww - 8, barH);
+        g.clip();
+        g.font = "600 10.5px ui-monospace, monospace";
+        g.textBaseline = "middle";
+        g.fillStyle = light ? "#475569" : "#94a3b8";
+        g.fillText("OFFLINE", x0 + 8, barY + barH / 2);
+        g.restore();
+      }
+
+      lane.hitGaps.push({ x0, x1: x0 + ww, y0: barY, y1: barY + barH, gap });
+    }
+
+    // 2. Top Program Group Strips (clean clipped pills on top rail)
+    g.font = "600 10.5px ui-monospace, monospace";
+    g.textBaseline = "middle";
+    for (const grp of lane.groups || []) {
+      if (grp.t1 < from || grp.t0 > to) continue;
+      const x0 = Math.max(0, x(grp.t0));
+      const x1 = Math.min(w, x(grp.t1));
+      const ww = Math.max(3, x1 - x0);
+      const hue = progHue(grp.program);
+      g.fillStyle = light ? `hsla(${hue}, 58%, 92%, 0.95)` : `hsla(${hue}, 52%, 52%, 0.18)`;
+      roundRect(g, x0, railY, ww, railH, 3);
+      g.fill();
+      g.strokeStyle = light ? `hsla(${hue}, 52%, 62%, 0.48)` : `hsla(${hue}, 62%, 64%, 0.42)`;
+      g.lineWidth = 1;
+      g.stroke();
+
+      if (ww > 54) {
+        const cleanName = String(grp.program || "—").replace(/\.nc$/i, "");
+        const txt = `${cleanName} · ${grp.count}`;
+        g.save();
+        g.beginPath();
+        g.rect(x0 + 3, railY, ww - 6, railH);
+        g.clip();
+        g.fillStyle = light ? `hsla(${hue}, 65%, 28%, 0.96)` : `hsla(${hue}, 78%, 84%, 0.95)`;
+        g.fillText(txt, x0 + 5, railY + railH / 2 + 0.5);
+        g.restore();
+      }
+      lane.hitGroups.push({ x0, x1: x0 + ww, y0: railY, y1: railY + railH, grp });
+    }
+
+    // 3. Part Cycle Bars (strictly clipped job numbers!)
+    const BAR_COL = light
+      ? {
+          normal: "#16a34a",
+          high: "#d97706",
+          over: "#dc2626",
+          low: "#0284c7",
+          neutral: "#64748b",
+          partial: "#94a3b8",
+        }
+      : {
+          normal: "#22c55e",
+          high: "#f59e0b",
+          over: "#ef4444",
+          low: "#38bdf8",
+          neutral: "#64748b",
+          partial: "#475569",
+        };
+
+    for (const p of lane.parts || []) {
+      if (p.t1 < from || p.t0 > to) continue;
+      const rawX0 = Math.max(0, x(p.t0));
+      const rawX1 = Math.min(w, x(p.t1));
+      const ww = Math.max(2.5, rawX1 - rawX0 - (rawX1 - rawX0 > 6 ? 1.5 : 0));
+      const kind = partDeviationKind(p);
+      g.fillStyle = BAR_COL[kind] || BAR_COL.normal;
+      g.globalAlpha = p.partial ? 0.55 : 0.94;
+      roundRect(g, rawX0, barY + 1, ww, barH - 2, 4);
+      g.fill();
+      g.globalAlpha = 1;
+
+      // Clipped compact job number inside bar (never overflows!)
+      if (ww >= 20 && p.job != null) {
+        const jobStr = typeof p.job === "number" ? `#${p.job}` : String(p.job).slice(0, 8);
+        g.save();
+        g.beginPath();
+        g.rect(rawX0 + 2, barY + 1, ww - 4, barH - 2);
+        g.clip();
+        g.fillStyle = "#ffffff";
+        g.font = "700 11px ui-monospace, monospace";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(jobStr, rawX0 + ww / 2, barY + barH / 2 + 0.5);
+        g.textAlign = "left";
+        g.restore();
+      }
+      lane.hitParts.push({ x0: rawX0, x1: rawX0 + ww, y0: barY, y1: barY + barH, p, kind });
+    }
+
+    // 4. Live In-Progress Edge Bar (when NOW is inside visible window)
+    const mo = ctx.over.get(lane.id);
+    if (mo && nowMs >= from && nowMs <= to) {
+      const elapsed = Number(mo.cycle && mo.cycle.this_cycle);
+      const active = String(mo.execution || "").toUpperCase() === "ACTIVE" || String(mo.status || "").toLowerCase() === "running";
+      if (mo.online !== false && Number.isFinite(elapsed) && elapsed > 0) {
+        const t0 = nowMs - elapsed * 1000;
+        const x0 = Math.max(0, x(t0));
+        const x1 = Math.min(w, x(nowMs));
+        const ww = Math.max(3, x1 - x0);
+        g.save();
+        g.fillStyle = active ? (light ? "#2563eb" : "#3b82f6") : "#64748b";
+        g.globalAlpha = active ? 0.9 : 0.45;
+        roundRect(g, x0, barY + 1, ww, barH - 2, 4);
+        g.fill();
+        g.globalAlpha = 1;
+        if (ww >= 34 && active) {
+          g.beginPath();
+          g.rect(x0 + 2, barY + 1, ww - 4, barH - 2);
+          g.clip();
+          g.fillStyle = "#ffffff";
+          g.font = "700 10.5px ui-monospace, monospace";
+          g.textAlign = "center";
+          g.textBaseline = "middle";
+          g.fillText("LIVE", x0 + ww / 2, barY + barH / 2 + 0.5);
+          g.textAlign = "left";
+        }
+        g.restore();
+        lane.hitParts.push({ x0, x1: x0 + ww, y0: barY, y1: barY + barH, live: true, m: mo });
+      }
+    }
+
+    // 5. Event Pins along the top rail (Alarm/E-Stop, Feed-Hold/Override, Program)
+    for (const ev of mEvents) {
+      if (!ev || ev.ts < from || ev.ts > to) continue;
+      const px = x(ev.ts);
+      const py = railY + railH / 2;
+      const isCrit = ev.rule === "estop" || ev.rule === "offline" || ev.sev === "CRITICAL";
+      const isWarn = ev.rule === "override" || ev.rule === "feed_hold" || ev.sev === "WARNING";
+      const col = isCrit ? "#ef4444" : isWarn ? "#f59e0b" : "#3b82f6";
+
+      g.save();
+      g.translate(px, py);
+      g.rotate(Math.PI / 4);
+      g.fillStyle = col;
+      g.fillRect(-4, -4, 8, 8);
+      g.strokeStyle = light ? "#ffffff" : "#0f121a";
+      g.lineWidth = 1.25;
+      g.strokeRect(-4, -4, 8, 8);
+      g.restore();
+
+      lane.hitPins.push({ x0: px - 7, x1: px + 7, y0: railY - 3, y1: railY + railH + 3, ev });
+    }
+
+    // 6. Shift Handover vertical guides (dashed violet)
+    if (shifts.length) {
+      g.save();
+      g.strokeStyle = light ? "rgba(109,40,217,0.34)" : "rgba(167,139,250,0.38)";
+      g.setLineDash([3, 3]);
+      g.lineWidth = 1;
+      for (const s of shifts) {
+        const px = Math.round(x(s.ts)) + 0.5;
+        g.beginPath();
+        g.moveTo(px, 0);
+        g.lineTo(px, H);
+        g.stroke();
+      }
+      g.restore();
+    }
+
+    // 7. Midnight Day Boundary (crimson)
+    if (days.length) {
+      g.strokeStyle = light ? "rgba(220,38,38,0.75)" : "rgba(244,63,94,0.82)";
+      g.lineWidth = 1.5;
+      for (const d of days) {
+        const px = Math.round(x(d)) + 0.5;
+        g.beginPath();
+        g.moveTo(px, 0);
+        g.lineTo(px, H);
+        g.stroke();
+      }
+      g.lineWidth = 1;
+    }
+
+    // 8. NOW line (amber)
+    if (nowMs >= from && nowMs <= to) {
+      const px = Math.round(x(nowMs)) + 0.5;
+      g.strokeStyle = "#f59e0b";
+      g.lineWidth = 1.8;
+      g.beginPath();
+      g.moveTo(px, 0);
+      g.lineTo(px, H);
+      g.stroke();
+      g.lineWidth = 1;
+    }
+  }
+
+  function paintExpandedTrace(lane, from, to, span) {
+    const g = lane.expandG;
+    const w = ctx.trackW;
+    const H = 116;
+    if (!g || !w) return;
+    const light = isLightTheme();
+    g.clearRect(0, 0, w, H);
+    const x = (ts) => ((ts - from) / span) * w;
+
+    // Update live telemetry sidebar numbers from overview
+    const mo = ctx.over.get(lane.id);
+    if (mo) {
+      const rpm = Number(mo.spindle_speed);
+      const feed = mo.overrides && Number(mo.overrides.feed);
+      lane.efRpm.textContent = mo.online === false ? "Offline" : (Number.isFinite(rpm) ? `${Math.round(rpm)} RPM` : "—");
+      lane.efFeed.textContent = mo.online === false ? "—" : (Number.isFinite(feed) ? `${Math.round(feed)}%` : "—");
+      lane.efTool.textContent = mo.tool_id || "—";
+    }
+
+    // Horizontal reference guides
+    g.strokeStyle = light ? "rgba(15,23,42,0.07)" : "rgba(255,255,255,0.07)";
+    g.lineWidth = 1;
+    for (const frac of [0.25, 0.5, 0.75]) {
+      const y = Math.round(H * frac) + 0.5;
+      g.beginPath();
+      g.moveTo(0, y);
+      g.lineTo(w, y);
+      g.stroke();
+    }
+
+    const sData = lane.series;
+    if (!sData || ((!sData.sspeed || !sData.sspeed.length) && (!sData.fdovrd || !sData.fdovrd.length))) {
+      g.fillStyle = light ? "#64748b" : "#94a3b8";
+      g.font = "12px var(--font-body), sans-serif";
+      g.fillText(mo && mo.online === false ? "Machine offline — no spindle or override telemetry in window" : "Loading spindle speed & feed override trace…", 14, H / 2 + 4);
+      return;
+    }
+
+    const padTop = 14;
+    const padBot = 12;
+    const plotH = H - padTop - padBot;
+
+    // Draw Spindle Speed (RPM) filled area curve
+    const rpmPts = (sData.sspeed || []).filter((p) => p.ts >= from - span * 0.1 && p.ts <= to + span * 0.1);
+    if (rpmPts.length >= 2) {
+      const maxRpm = Math.max(1000, ...rpmPts.map((p) => p.avg || 0)) * 1.1;
+      const yRpm = (v) => padTop + plotH - (Math.max(0, v) / maxRpm) * plotH;
+
+      g.beginPath();
+      rpmPts.forEach((pt, idx) => {
+        const px = x(pt.ts);
+        const py = yRpm(pt.avg || 0);
+        if (idx === 0) g.moveTo(px, py);
+        else g.lineTo(px, py);
+      });
+      const lastX = x(rpmPts[rpmPts.length - 1].ts);
+      const firstX = x(rpmPts[0].ts);
+      g.lineTo(lastX, padTop + plotH);
+      g.lineTo(firstX, padTop + plotH);
+      g.closePath();
+      const grad = g.createLinearGradient(0, padTop, 0, padTop + plotH);
+      grad.addColorStop(0, light ? "rgba(37,99,235,0.26)" : "rgba(59,130,246,0.34)");
+      grad.addColorStop(1, light ? "rgba(37,99,235,0.02)" : "rgba(59,130,246,0.02)");
+      g.fillStyle = grad;
+      g.fill();
+
+      g.beginPath();
+      rpmPts.forEach((pt, idx) => {
+        const px = x(pt.ts);
+        const py = yRpm(pt.avg || 0);
+        if (idx === 0) g.moveTo(px, py);
+        else g.lineTo(px, py);
+      });
+      g.strokeStyle = light ? "#2563eb" : "#60a5fa";
+      g.lineWidth = 1.6;
+      g.stroke();
+
+      g.fillStyle = light ? "#2563eb" : "#93c5fd";
+      g.font = "600 10px ui-monospace, monospace";
+      g.fillText(`Peak ${Math.round(maxRpm / 1.1)} RPM`, 8, 11);
+    }
+
+    // Draw Feed Override (%) stepped line with 100% dashed guide
+    const feedPts = (sData.fdovrd || []).filter((p) => p.ts >= from - span * 0.1 && p.ts <= to + span * 0.1);
+    if (feedPts.length >= 2) {
+      const maxFeed = Math.max(120, ...feedPts.map((p) => p.avg || 0));
+      const yFeed = (v) => padTop + plotH - (Math.max(0, v) / maxFeed) * plotH;
+
+      // 100% nominal reference line
+      const y100 = Math.round(yFeed(100)) + 0.5;
+      g.save();
+      g.strokeStyle = light ? "rgba(217,119,6,0.42)" : "rgba(245,158,11,0.42)";
+      g.setLineDash([4, 4]);
+      g.beginPath();
+      g.moveTo(0, y100);
+      g.lineTo(w, y100);
+      g.stroke();
+      g.restore();
+
+      g.beginPath();
+      feedPts.forEach((pt, idx) => {
+        const px = x(pt.ts);
+        const py = yFeed(pt.avg || 0);
+        if (idx === 0) g.moveTo(px, py);
+        else {
+          g.lineTo(px, yFeed(feedPts[idx - 1].avg || 0));
+          g.lineTo(px, py);
+        }
+      });
+      g.strokeStyle = light ? "#d97706" : "#fbbf24";
+      g.lineWidth = 1.5;
+      g.stroke();
+
+      g.fillStyle = light ? "#b45309" : "#fcd34d";
+      g.font = "600 10px ui-monospace, monospace";
+      g.textAlign = "right";
+      g.fillText("100% Feed", w - 8, y100 - 4);
+      g.textAlign = "left";
+    }
+  }
+
+  function paintMinimap(from, to) {
+    const g = refs.minimapG;
+    const w = ctx.trackW;
+    const H = 40;
+    if (!g || !w) return;
+    const light = isLightTheme();
+    g.clearRect(0, 0, w, H);
+
+    const bFrom = ctx.cover.has ? Math.min(ctx.cover.from, from) : from;
+    const bTo = ctx.cover.has ? Math.max(ctx.cover.to, to) : to;
+    const bSpan = Math.max(60e3, bTo - bFrom);
+
+    refs.minimapSpan.textContent = fmtDurCompact(bSpan);
+    const bins = computeMinimapBins(ctx.lanes, bFrom, bTo, Math.min(160, Math.max(48, Math.floor(w / 6))));
+    const bw = w / Math.max(1, bins.length);
+    for (let i = 0; i < bins.length; i++) {
+      const b = bins[i];
+      const bx = i * bw;
+      const runH = Math.round(b.runFrac * (H - 10));
+      const lossH = Math.round(b.lossFrac * (H - 10));
+      const alarmH = Math.round(b.alarmFrac * (H - 10));
+      let curY = H - 5;
+      if (runH > 0) {
+        g.fillStyle = light ? "rgba(22,163,74,0.55)" : "rgba(34,197,94,0.55)";
+        g.fillRect(bx + 0.5, curY - runH, Math.max(1, bw - 1), runH);
+        curY -= runH;
+      }
+      if (lossH > 0) {
+        g.fillStyle = light ? "rgba(100,116,139,0.34)" : "rgba(148,163,184,0.30)";
+        g.fillRect(bx + 0.5, curY - lossH, Math.max(1, bw - 1), lossH);
+        curY -= lossH;
+      }
+      if (alarmH > 0) {
+        g.fillStyle = light ? "rgba(220,38,38,0.72)" : "rgba(244,63,94,0.72)";
+        g.fillRect(bx + 0.5, curY - alarmH, Math.max(1, bw - 1), alarmH);
+      }
+    }
+
+    // Position viewport brush
+    const leftPct = Math.max(0, Math.min(1, (from - bFrom) / bSpan));
+    const rightPct = Math.max(leftPct + 0.02, Math.min(1, (to - bFrom) / bSpan));
+    refs.brush.style.left = `${(leftPct * 100).toFixed(2)}%`;
+    refs.brush.style.width = `${Math.max(2, (rightPct - leftPct) * 100).toFixed(2)}%`;
+    refs.brush.hidden = false;
+    ctx.minimapBounds = { bFrom, bTo, bSpan };
+  }
+
+  // ---- Minimap Click & Brush Drag ----
+  {
+    let dragMode = null;
+    let startX = 0;
+    let startAnchor = 0;
+    refs.minimapTrack.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !ctx.minimapBounds) return;
+      const rect = refs.minimapTrack.getBoundingClientRect();
+      const { bFrom, bSpan } = ctx.minimapBounds;
+      if (e.target === refs.brush) {
+        dragMode = "brush";
+        startX = e.clientX;
+        startAnchor = ctx.live ? maxFutureAnchor(ctx.spanMs) : ctx.anchor;
+      } else {
+        // Click to center viewport on clicked timestamp
+        const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+        const targetCenter = bFrom + frac * bSpan;
+        const cap = maxFutureAnchor(ctx.spanMs);
+        const nextTo = Math.min(cap, targetCenter + ctx.spanMs * 0.5);
+        ctx.live = nextTo >= cap - 1500;
+        ctx.anchor = nextTo;
+        syncPresetBtns();
+        paintWinLabel();
+        markDirty({ all: true });
+        dragMode = "brush";
+        startX = e.clientX;
+        startAnchor = nextTo;
+      }
+      try { refs.minimapTrack.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
+    });
+    refs.minimapTrack.addEventListener("pointermove", (e) => {
+      if (!dragMode || !ctx.minimapBounds) return;
+      const rect = refs.minimapTrack.getBoundingClientRect();
+      const dx = e.clientX - startX;
+      const dtMs = (dx / Math.max(1, rect.width)) * ctx.minimapBounds.bSpan;
+      const cap = maxFutureAnchor(ctx.spanMs);
+      const nextTo = Math.min(cap, startAnchor + dtMs);
+      ctx.live = nextTo >= cap - 1500;
+      ctx.anchor = nextTo;
+      syncPresetBtns();
+      paintWinLabel();
+      markDirty({ all: true });
+    });
+    const end = (e) => {
+      if (!dragMode) return;
+      dragMode = null;
+      try { refs.minimapTrack.releasePointerCapture(e.pointerId); } catch {}
+      ensureBuffer(false);
+      refreshExpandedSeries();
+    };
+    refs.minimapTrack.addEventListener("pointerup", end);
+    refs.minimapTrack.addEventListener("pointercancel", end);
+  }
+
+  function updateSummariesAndGutters(from, to) {
+    const effTo = Math.min(to, Date.now());
+    const laneSums = new Map();
+
+    for (const [id, lane] of ctx.lanes) {
+      const s = summarizeLaneWindow(lane.parts, lane.bands, from, effTo);
+      lane.summary = s;
+      laneSums.set(id, s);
+
+      const mo = ctx.over.get(id);
+      const rawSt = mo
+        ? (mo.online === false ? "offline" : String(mo.status || "idle").toLowerCase())
+        : "idle";
+      lane.stateEl.textContent = statusLabel(rawSt);
+      lane.stateEl.className = `tl2-mstate st-${rawSt === "running" || rawSt === "paused" || rawSt === "alarm" || rawSt === "offline" ? rawSt : "idle"}`;
+
+      const prog = mo && mo.active_program ? String(mo.active_program).replace(/\.nc$/i, "") : "";
+      lane.metaEl.textContent = rawSt === "offline"
+        ? "Offline · no signal"
+        : `${s.partCount} part${s.partCount === 1 ? "" : "s"}${prog ? ` · ${prog}` : ""}`;
+      lane.utilEl.textContent = s.utilPct != null ? `${s.utilPct}%` : "—";
+    }
+
+    const fleet = summarizeFleetWindow(laneSums, ctx.over, ctx.events, ctx.downtimeLogs, from, effTo);
+    refs.kpiUtil.textContent = `${fleet.fleetUtilPct}%`;
+    refs.kpiUtil.className = `tl2-kpi-v ${fleet.fleetUtilPct >= 75 ? "tl2-kpi-good" : fleet.fleetUtilPct >= 50 ? "tl2-kpi-warn" : "tl2-kpi-bad"}`;
+    refs.kpiUtilBar.style.width = `${Math.max(0, Math.min(100, fleet.fleetUtilPct))}%`;
+    refs.kpiUtilSub.textContent = `${fleet.runningNow}/${fleet.totalMachines} cutting · ${fleet.onlineNow} online`;
+
+    refs.kpiParts.textContent = String(fleet.totalParts);
+    const hrs = Math.max(0.1, (effTo - from) / 3600e3);
+    refs.kpiPartsSub.textContent = `${(fleet.totalParts / hrs).toFixed(1)} parts/hr fleet pace`;
+
+    refs.kpiLoss.textContent = fmtDurCompact(fleet.totalLossMs);
+    refs.kpiLoss.className = `tl2-kpi-v ${fleet.totalAlarmMs > 0 ? "tl2-kpi-bad" : fleet.totalLossMs > 0 ? "tl2-kpi-warn" : "tl2-kpi-good"}`;
+    refs.kpiLossSub.textContent = `Idle ${fmtDurCompact(fleet.totalIdleMs)} · Hold ${fmtDurCompact(fleet.totalHoldMs)} · Alarm ${fmtDurCompact(fleet.totalAlarmMs)}`;
+
+    refs.kpiInc.textContent = String(fleet.incidentCount);
+    refs.kpiInc.className = `tl2-kpi-v ${fleet.incidentCount > 0 ? "tl2-kpi-info" : ""}`;
+    refs.kpiIncSub.textContent = `${fleet.loggedInWindow} gap cause${fleet.loggedInWindow === 1 ? "" : "s"} logged in window`;
+  }
+
+  function renderDirty() {
+    const { from, to, span } = windowSpan();
+    if (ctx.dirtyAxis) {
+      paintAxis(from, to, span);
+      ctx.dirtyAxis = false;
+    }
+    if (ctx.dirtyLanes) {
+      const shifts = span <= 3 * 86400e3 ? computeShiftBoundaries(from, to) : [];
+      const days = computeIstDayBoundaries(from, to);
+      for (const lane of ctx.lanes.values()) {
+        paintLane(lane, from, to, span, shifts, days);
+      }
+      ctx.dirtyLanes = false;
+    }
+    if (ctx.dirtyExpand) {
+      for (const id of ctx.expanded) {
+        const lane = ctx.lanes.get(id);
+        if (lane) paintExpandedTrace(lane, from, to, span);
+      }
+      ctx.dirtyExpand = false;
+    }
+    if (ctx.dirtyMinimap) {
+      paintMinimap(from, to);
+      ctx.dirtyMinimap = false;
+    }
+    if (ctx.dirtySummary) {
+      updateSummariesAndGutters(from, to);
+      ctx.dirtySummary = false;
+    }
+  }
+
+  // ==================== HIT-TESTING, OBSIDIAN CALLOUT & SLIDE-OVER DRAWER ====================
+
+  function hitTestLane(lane, mx, my) {
+    // Priority 1: Event Pins on top rail
+    const pin = lane.hitPins.find((r) => mx >= r.x0 && mx <= r.x1 && my >= r.y0 && my <= r.y1);
+    if (pin) return { type: "pin", data: pin.ev };
+    // Priority 2: Program Group Strip on top rail
+    const grp = lane.hitGroups.find((r) => mx >= r.x0 && mx <= r.x1 && my >= r.y0 && my <= r.y1);
+    if (grp) return { type: "group", data: grp.grp };
+    // Priority 3: Part / Live Cycle Bar
+    const part = lane.hitParts.find((r) => mx >= r.x0 && mx <= r.x1 && my >= r.y0 && my <= r.y1);
+    if (part) return { type: part.live ? "live" : "part", data: part.live ? part.m : part.p, kind: part.kind };
+    // Priority 4: Non-Cutting State Gap
+    const gap = lane.hitGaps.find((r) => mx >= r.x0 && mx <= r.x1 && my >= r.y0 && my <= r.y1);
+    if (gap) return { type: "gap", data: gap.gap };
+    return null;
+  }
+
+  function placeCallout(clientX, clientY) {
+    const el = refs.callout;
+    const r = el.getBoundingClientRect();
+    const w = r.width || 270;
+    const h = r.height || 140;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = clientX + 16;
+    if (x + w > vw - 12) x = clientX - w - 16;
+    x = Math.max(10, x);
+    let y = clientY - h / 2;
+    y = Math.max(56, Math.min(vh - h - 12, y));
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+  }
+
+  function onLaneHover(e, id) {
+    if (ctx.drawerItem) return;
+    const lane = ctx.lanes.get(id);
+    if (!lane) return;
+    const rect = lane.canvas.getBoundingClientRect();
+    const hit = hitTestLane(lane, e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit) {
+      refs.callout.hidden = true;
+      return;
+    }
+
+    let html = "";
+    if (hit.type === "pin") {
+      const ev = hit.data;
+      const tagCol = ev.sev === "CRITICAL" ? "#fb7185" : ev.sev === "WARNING" ? "#fbbf24" : "#93c5fd";
+      html = `
+        <div class="tl2-co-head">
+          <span class="tl2-co-title">${escHtml(lane.name)} · Event</span>
+          <span class="tl2-co-tag" style="color:${tagCol}">${escHtml(ev.rule || ev.sev)}</span>
+        </div>
+        <div class="tl2-co-grid">
+          <span class="tl2-co-k">Time</span><span class="tl2-co-v">${fmtClockSecIST(ev.ts)} IST</span>
+          <span class="tl2-co-k">Detail</span><span class="tl2-co-v">${escHtml(ev.msg || ev.rule)}</span>
+        </div>
+      `;
+    } else if (hit.type === "group") {
+      const grp = hit.data;
+      const parts = lane.parts.filter((p) => p.groupId === grp.groupId);
+      const cutMs = parts.reduce((a, p) => a + (p.dur || 0), 0);
+      const wallMs = Math.max(1, grp.t1 - grp.t0);
+      const util = Math.min(100, Math.round((cutMs / wallMs) * 100));
+      html = `
+        <div class="tl2-co-head">
+          <span class="tl2-co-title">${escHtml(String(grp.program || "—").replace(/\.nc$/i, ""))}</span>
+          <span class="tl2-co-tag" style="color:#93c5fd">${grp.count} job${grp.count === 1 ? "" : "s"}</span>
+        </div>
+        <div class="tl2-co-grid">
+          <span class="tl2-co-k">Window</span><span class="tl2-co-v">${fmtClockIST(grp.t0)} → ${fmtClockIST(grp.t1)}</span>
+          <span class="tl2-co-k">Cutting Share</span><span class="tl2-co-v">${util}% (${fmtDurCompact(cutMs)})</span>
+          <span class="tl2-co-k">Learned Baseline</span><span class="tl2-co-v">${grp.baseline ? fmtDurCompact(grp.baseline * 1000) : "Pending"}</span>
+        </div>
+        <div class="tl2-co-foot">Click for full program breakdown</div>
+      `;
+    } else if (hit.type === "live") {
+      const m = hit.data;
+      const c = m.cycle || {};
+      html = `
+        <div class="tl2-co-head">
+          <span class="tl2-co-title">${escHtml(lane.name)} · Live Cycle</span>
+          <span class="tl2-co-tag" style="color:#60a5fa">${statusLabel(m.status)}</span>
+        </div>
+        <div class="tl2-co-grid">
+          <span class="tl2-co-k">Program</span><span class="tl2-co-v">${escHtml(String(m.active_program || "—").replace(/\.nc$/i, ""))}</span>
+          <span class="tl2-co-k">Elapsed</span><span class="tl2-co-v">${fmtDurCompact(Number(c.this_cycle || 0) * 1000)}</span>
+          ${Number.isFinite(c.remaining_cycle_time) ? `<span class="tl2-co-k">Remaining</span><span class="tl2-co-v">${fmtDurCompact(Number(c.remaining_cycle_time) * 1000)}</span>` : ""}
+          <span class="tl2-co-k">Spindle</span><span class="tl2-co-v">${Number.isFinite(m.spindle_speed) ? `${Math.round(m.spindle_speed)} RPM` : "—"}</span>
+        </div>
+      `;
+    } else if (hit.type === "part") {
+      const p = hit.data;
+      const pct = p.dev != null ? Math.round((p.dev - 1) * 100) : null;
+      const tagCol = hit.kind === "over" ? "#fb7185" : hit.kind === "high" ? "#fbbf24" : hit.kind === "low" ? "#38bdf8" : "#4ade80";
+      const tagTxt = pct != null ? `${pct >= 0 ? "+" : ""}${pct}% vs base` : "Normal";
+      html = `
+        <div class="tl2-co-head">
+          <span class="tl2-co-title">${escHtml(lane.name)} · Job #${escHtml(p.job ?? "—")}</span>
+          <span class="tl2-co-tag" style="color:${tagCol}">${tagTxt}</span>
+        </div>
+        <div class="tl2-co-grid">
+          <span class="tl2-co-k">Program</span><span class="tl2-co-v">${escHtml(String(p.program || "—").replace(/\.nc$/i, ""))}</span>
+          <span class="tl2-co-k">Time</span><span class="tl2-co-v">${fmtClockSecIST(p.t0)} → ${fmtClockSecIST(p.t1)}</span>
+          <span class="tl2-co-k">Duration</span><span class="tl2-co-v">${fmtDurCompact(p.dur)}</span>
+          ${p.baseline ? `<span class="tl2-co-k">Baseline</span><span class="tl2-co-v">${fmtDurCompact(p.baseline * 1000)}</span>` : ""}
+        </div>
+        <div class="tl2-co-foot">Click for cycle &amp; incident inspector</div>
+      `;
+    } else if (hit.type === "gap") {
+      const gap = hit.data;
+      const stCol = gap.status === "alarm" ? "#fb7185" : gap.status === "paused" ? "#fbbf24" : "#cbd5e1";
+      html = `
+        <div class="tl2-co-head">
+          <span class="tl2-co-title">${escHtml(lane.name)} · ${statusLabel(gap.status)} Gap</span>
+          <span class="tl2-co-tag" style="color:${stCol}">${fmtDurCompact(gap.durMs)}</span>
+        </div>
+        <div class="tl2-co-grid">
+          <span class="tl2-co-k">Window</span><span class="tl2-co-v">${fmtClockSecIST(gap.t0)} → ${fmtClockSecIST(gap.t1)}</span>
+          <span class="tl2-co-k">Recorded Cause</span><span class="tl2-co-v">${gap.logged ? escHtml(gap.logged.reason) : "Unclassified"}</span>
+          ${gap.events.length ? `<span class="tl2-co-k">Events</span><span class="tl2-co-v">${gap.events.length} controller event${gap.events.length === 1 ? "" : "s"}</span>` : ""}
+        </div>
+        <div class="tl2-co-foot">${gap.logged ? "Click to review or update logged reason" : "Click to log downtime root cause"}</div>
+      `;
+    }
+
+    refs.callout.innerHTML = html;
+    refs.callout.hidden = false;
+    placeCallout(e.clientX, e.clientY);
+  }
+
+  function placePopup(clientX, clientY) {
+    const el = refs.drawer;
+    const r = el.getBoundingClientRect();
+    const w = r.width || 368;
+    const h = r.height || 360;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const nav = document.querySelector(".godnav");
+    const topBound = Math.max(12, (nav ? nav.getBoundingClientRect().bottom : 0) + 8);
+    const GAP = 14;
+    const MARGIN = 12;
+
+    let x = clientX + GAP;
+    if (x + w > vw - MARGIN) x = clientX - w - GAP;
+    x = Math.max(MARGIN, Math.min(vw - w - MARGIN, x));
+
+    let y = clientY - Math.min(h * 0.35, 140);
+    if (y + h > vh - MARGIN) y = vh - h - MARGIN;
+    if (y < topBound) y = topBound;
+
+    el.style.left = `${Math.round(x)}px`;
+    el.style.top = `${Math.round(y)}px`;
+  }
+
+  function onLaneClick(e, id) {
+    const lane = ctx.lanes.get(id);
+    if (!lane) return;
+    const rect = lane.canvas.getBoundingClientRect();
+    const hit = hitTestLane(lane, e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit) return;
+    refs.callout.hidden = true;
+    openDrawer(lane, hit, e.clientX, e.clientY);
+  }
+
+  function openDrawer(lane, hit, clientX = window.innerWidth / 2, clientY = 180) {
+    ctx.drawerItem = { lane, hit };
+    refs.drawerBackdrop.hidden = false;
+    const finishPlace = () => placePopup(clientX, clientY);
+
+    if (hit.type === "gap") {
+      const gap = hit.data;
+      const durMin = Math.max(1, Math.round(gap.durMs / 60e3));
+      const shiftLbl = shiftLabelForTs(gap.t0);
+      refs.drawerTitle.textContent = `${lane.name} · ${statusLabel(gap.status)} Gap`;
+      refs.drawerSub.textContent = `${fmtDayIST(gap.t0)} · ${fmtClockSecIST(gap.t0)} → ${fmtClockSecIST(gap.t1)} IST`;
+
+      const evRows = gap.events.length
+        ? gap.events.map((ev) => `<div class="tl2-ev-row"><span class="tl2-ev-time">${fmtClockSecIST(ev.ts)}</span><span>${escHtml(ev.msg || ev.rule)}</span></div>`).join("")
+        : `<div style="font-size:12px;color:var(--tl2-muted)">No controller alarm or override events overlapped this gap.</div>`;
+
+      const existingHtml = gap.logged
+        ? `<div class="tl2-dsec">
+            <div class="tl2-dsec-h">Logged Shop-Floor Cause</div>
+            <div class="tl2-dkv-grid">
+              <div class="tl2-dkv"><span>Reason</span><strong>${escHtml(gap.logged.reason)}</strong></div>
+              <div class="tl2-dkv"><span>Duration</span><strong>${gap.logged.durationMin} min</strong></div>
+              ${gap.logged.operator ? `<div class="tl2-dkv"><span>Operator</span><strong>${escHtml(gap.logged.operator)}</strong></div>` : ""}
+              ${gap.logged.note ? `<div class="tl2-dkv" style="grid-column:1/-1"><span>Note</span><strong>${escHtml(gap.logged.note)}</strong></div>` : ""}
+            </div>
+            <button type="button" class="tl2-btn" data-df="delGapLog" style="align-self:flex-start;margin-top:4px">Remove Logged Cause</button>
+          </div>`
+        : "";
+
+      const reasonOpts = DOWNTIME_REASONS.map((r) => `<option value="${escHtml(r)}">${escHtml(r)}</option>`).join("");
+      refs.drawerBody.innerHTML = `
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Gap Telemetry Summary</div>
+          <div class="tl2-dkv-grid">
+            <div class="tl2-dkv"><span>Controller State</span><strong>${statusLabel(gap.status)}</strong></div>
+            <div class="tl2-dkv"><span>Duration</span><strong>${fmtDurCompact(gap.durMs)}</strong></div>
+            <div class="tl2-dkv"><span>Shift</span><strong>${escHtml(shiftLbl)}</strong></div>
+            <div class="tl2-dkv"><span>Accountability</span><strong>${gap.logged ? "Logged" : "Unclassified"}</strong></div>
+          </div>
+        </div>
+        ${existingHtml}
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">${gap.logged ? "Log Additional Cause" : "Log Downtime Root Cause"}</div>
+          <form class="tl2-form" data-df="gapForm">
+            <label class="tl2-field">
+              <span>Root Cause Category</span>
+              <select class="tl2-select" name="reason" required>${reasonOpts}</select>
+            </label>
+            <label class="tl2-field">
+              <span>Duration (minutes)</span>
+              <input class="tl2-input" type="number" name="durationMin" min="1" max="1440" value="${durMin}" required />
+            </label>
+            <label class="tl2-field">
+              <span>Operator (optional)</span>
+              <input class="tl2-input" type="text" name="operator" maxlength="60" placeholder="e.g. R. Sharma" />
+            </label>
+            <label class="tl2-field">
+              <span>Shop-Floor Note (optional)</span>
+              <textarea class="tl2-textarea" name="note" maxlength="280" placeholder="Fixture adjustment, tool insert change, waiting for raw stock…"></textarea>
+            </label>
+            <button type="submit" class="tl2-submit-btn">Save to Fleet Intelligence Log</button>
+          </form>
+        </div>
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Overlapping Controller Events</div>
+          <div class="tl2-ev-list">${evRows}</div>
+        </div>
+      `;
+
+      const delBtn = refs.drawerBody.querySelector('[data-df="delGapLog"]');
+      if (delBtn && gap.logged) {
+        delBtn.addEventListener("click", async () => {
+          delBtn.disabled = true;
+          try {
+            const st = await fleetStore.deleteDowntime(gap.logged.id);
+            ctx.downtimeLogs = st.downtimeLogs || [];
+            markDirty({ lanes: true, summary: true });
+            closeDrawer();
+          } catch {
+            delBtn.disabled = false;
+          }
+        });
+      }
+
+      const form = refs.drawerBody.querySelector('[data-df="gapForm"]');
+      if (form) {
+        form.addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const btn = form.querySelector("button[type=submit]");
+          btn.disabled = true;
+          btn.textContent = "Saving…";
+          const fd = new FormData(form);
+          try {
+            const st = await fleetStore.addDowntime({
+              machineId: lane.id,
+              reason: String(fd.get("reason") || "Other"),
+              durationMin: Math.max(1, Number(fd.get("durationMin")) || durMin),
+              startTs: Math.round(gap.t0),
+              shiftLabel: shiftLbl,
+              operator: String(fd.get("operator") || "").trim(),
+              note: String(fd.get("note") || "").trim(),
+            });
+            ctx.downtimeLogs = st.downtimeLogs || [];
+            markDirty({ lanes: true, summary: true });
+            closeDrawer();
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = `Save failed — retry`;
+          }
+        });
+      }
+      finishPlace();
+      return;
+    }
+
+    if (hit.type === "group") {
+      const grp = hit.data;
+      const parts = lane.parts.filter((p) => p.groupId === grp.groupId);
+      const done = parts.filter((p) => !p.partial && p.dur > 0);
+      const cutMs = parts.reduce((a, p) => a + (p.dur || 0), 0);
+      const wallMs = Math.max(1, grp.t1 - grp.t0);
+      const idleMs = Math.max(0, wallMs - cutMs);
+      const util = Math.min(100, Math.round((cutMs / wallMs) * 100));
+      const maxDur = Math.max(1, ...done.map((p) => p.dur));
+      const spark = done.slice(-48).map((p) => {
+        const k = partDeviationKind(p);
+        return `<i class="k-${k}" style="height:${Math.max(10, Math.round((p.dur / maxDur) * 100))}%"></i>`;
+      }).join("");
+      const evs = (ctx.events.get(lane.id) || []).filter((e) => e.ts >= grp.t0 && e.ts <= grp.t1);
+
+      refs.drawerTitle.textContent = String(grp.program || "Program Run").replace(/\.nc$/i, "");
+      refs.drawerSub.textContent = `${lane.name} · ${grp.count} jobs · ${fmtClockIST(grp.t0)} → ${fmtClockIST(grp.t1)} IST`;
+      refs.drawerBody.innerHTML = `
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Run Summary</div>
+          <div class="tl2-dkv-grid">
+            <div class="tl2-dkv"><span>Cutting Time</span><strong>${fmtDurCompact(cutMs)} (${util}%)</strong></div>
+            <div class="tl2-dkv"><span>Inter-Cycle Gaps</span><strong>${fmtDurCompact(idleMs)}</strong></div>
+            <div class="tl2-dkv"><span>Completed Jobs</span><strong>${done.length}</strong></div>
+            <div class="tl2-dkv"><span>Learned Baseline</span><strong>${grp.baseline ? fmtDurCompact(grp.baseline * 1000) : "Pending"}</strong></div>
+          </div>
+        </div>
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Cycle Duration Profile (${done.length} cycles)</div>
+          <div class="tl2-spark">${spark || '<span style="font-size:12px;color:var(--tl2-muted)">No completed cycles in run</span>'}</div>
+        </div>
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Incidents During Run (${evs.length})</div>
+          <div class="tl2-ev-list">
+            ${evs.length
+              ? evs.map((e) => `<div class="tl2-ev-row"><span class="tl2-ev-time">${fmtClockSecIST(e.ts)}</span><span>${escHtml(e.msg || e.rule)}</span></div>`).join("")
+              : `<div style="font-size:12px;color:var(--tl2-emerald)">Clean run — no E-stops or override dips recorded.</div>`}
+          </div>
+        </div>
+      `;
+      finishPlace();
+      return;
+    }
+
+    if (hit.type === "part") {
+      const p = hit.data;
+      const evs = (ctx.events.get(lane.id) || []).filter((e) => e.ts >= p.t0 && e.ts <= p.t1);
+      const pct = p.dev != null ? Math.round((p.dev - 1) * 100) : null;
+      refs.drawerTitle.textContent = `${lane.name} · Job #${p.job ?? "—"}`;
+      refs.drawerSub.textContent = `${String(p.program || "—").replace(/\.nc$/i, "")} · ${fmtClockSecIST(p.t0)} → ${fmtClockSecIST(p.t1)} IST`;
+      refs.drawerBody.innerHTML = `
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Cycle Metrics</div>
+          <div class="tl2-dkv-grid">
+            <div class="tl2-dkv"><span>Actual Duration</span><strong>${fmtDurCompact(p.dur)}</strong></div>
+            <div class="tl2-dkv"><span>Baseline</span><strong>${p.baseline ? fmtDurCompact(p.baseline * 1000) : "—"}</strong></div>
+            <div class="tl2-dkv"><span>Deviation</span><strong>${pct != null ? `${pct >= 0 ? "+" : ""}${pct}%` : "—"}</strong></div>
+            <div class="tl2-dkv"><span>Band</span><strong>${hit.kind === "over" ? "Overrun (>+30%)" : hit.kind === "high" ? "Mild Slow (+15%)" : hit.kind === "low" ? "Short (-15%)" : "Nominal"}</strong></div>
+          </div>
+        </div>
+        <div class="tl2-dsec">
+          <div class="tl2-dsec-h">Overlapping Controller Events (${evs.length})</div>
+          <div class="tl2-ev-list">
+            ${evs.length
+              ? evs.map((e) => `<div class="tl2-ev-row"><span class="tl2-ev-time">${fmtClockSecIST(e.ts)}</span><span>${escHtml(e.msg || e.rule)}</span></div>`).join("")
+              : `<div style="font-size:12px;color:var(--tl2-emerald)">No interruptions during this cycle.</div>`}
+          </div>
+        </div>
+      `;
+      finishPlace();
+      return;
+    }
+
+    if (hit.type === "pin") {
+      const ev = hit.data;
+      refs.drawerTitle.textContent = `${lane.name} · Controller Event`;
+      refs.drawerSub.textContent = `${fmtDayIST(ev.ts)} · ${fmtClockSecIST(ev.ts)} IST`;
+      refs.drawerBody.innerHTML = `
+        <div class="tl2-dsec">
+          <div class="tl2-dkv-grid">
+            <div class="tl2-dkv"><span>Severity</span><strong>${escHtml(ev.sev || "INFO")}</strong></div>
+            <div class="tl2-dkv"><span>Rule</span><strong>${escHtml(ev.rule || "event")}</strong></div>
+            <div class="tl2-dkv" style="grid-column:1/-1"><span>Message</span><strong>${escHtml(ev.msg || ev.rule)}</strong></div>
+          </div>
+        </div>
+      `;
+      finishPlace();
+    }
+  }
+
+  function closeDrawer() {
+    ctx.drawerItem = null;
+    refs.drawerBackdrop.hidden = true;
+  }
+
+  refs.drawerClose.addEventListener("click", closeDrawer);
+  refs.drawerBackdrop.addEventListener("click", (e) => {
+    if (e.target === refs.drawerBackdrop) closeDrawer();
+  });
+  const onKeyDown = (e) => {
+    if (e.key === "Escape" && !refs.drawerBackdrop.hidden) closeDrawer();
+  };
+  document.addEventListener("keydown", onKeyDown);
+
+  // ---- Theme Toggle Listener ----
+  const onTheme = () => {
+    if (!ctx.destroyed) markDirty({ all: true });
+  };
   window.addEventListener("vmc-theme", onTheme);
 
-  // ---- wall-board bridge (tv.js) ----
-  // The wall timeline step is a presentation, not the operator's timeline: it
-  // pins Hour + live and follows the wall fleet. Everything here is ephemeral
-  // ctx state — NOTHING writes localStorage — so the wall cannot clobber the
-  // dashboard's own range/filter on a shared origin. tv.js calls present() on
-  // every timeline step and release() when leaving it, which re-seeds from
-  // storage and repaints.
-  function setRangeSilent(key) {
-    if (!RANGE_MS[key]) return;
-    ctx.rangeKey = key;
-    ctx.spanMs = RANGE_MS[key];
-    syncRangeBtns();
-    if (ctx.pinned) unpin();
-    ctx.live = false;
-    ctx.anchor = Date.now() + RANGE_MS[key] * 0.5;
-    ctx.buf.loaded = false;
-    ctx.cover.has = false;
-    loadRange(true);
-  }
+  // ---- TV Wall-Board Bridge (preserved for tv.js rotation) ----
   window.__VMC_TIMELINE__ = {
     present(visibleIds) {
-      setRangeSilent("hour");
-      ctx.live = true; paintWinLabel(); repaint(); ensureBuffer();
+      applyPreset("1h", true);
       if (Array.isArray(visibleIds)) {
         ctx.wallOrder = visibleIds.slice();
         const all = ctx.machines.map((m) => m.id);
-        const coversAll = all.length > 0 && visibleIds.length === all.length &&
-          all.every((id) => visibleIds.indexOf(id) !== -1);
+        const coversAll = all.length > 0 && visibleIds.length === all.length && all.every((id) => visibleIds.includes(id));
         ctx.sel = coversAll ? null : new Set(visibleIds);
         buildFilterMenu();
-        applyFilter();
+        syncVisibleLanes();
       }
     },
     release() {
       ctx.wallOrder = null;
       ctx.sel = loadSel();
-      const r = localStorage.getItem(LS_RANGE);
-      if (r && RANGE_MS[r]) setRangeSilent(r);
+      const saved = localStorage.getItem(LS_RANGE);
+      if (saved && PRESET_MAP[saved]) applyPreset(saved, true);
       buildFilterMenu();
-      applyFilter();
+      syncVisibleLanes();
     },
   };
+
+  // ---- Boot ----
+  hydrateFromSnapshot();
+  syncCanvasSizes();
+  paintWinLabel();
+  syncPresetBtns();
+  loadOverviewAndBoot(true);
+  ctx.liveTimer = setInterval(liveTick, 1000);
 
   return {
-    // router calls refresh() every 15s while active. We refresh the machine
-    // list + buffer, but never while the user is mid-drag, and ensureBuffer
-    // keeps the fetch seamless (only reloads if stale or near an edge).
     refresh() {
-      if (!refs.grid.offsetParent || ctx.dragging) return;
-      loadRange(ctx.live);   // when live, keep the right edge fresh; else seamless
+      if (ctx.destroyed || ctx.dragging) return;
+      if (!refs.board || !refs.board.offsetParent) return;
+      fleetStore.load().then((st) => {
+        if (!ctx.destroyed && st && Array.isArray(st.downtimeLogs)) {
+          ctx.downtimeLogs = st.downtimeLogs;
+          markDirty({ lanes: true, summary: true });
+        }
+      }).catch(() => {});
+      loadBuffer(ctx.live);
     },
     destroy() {
+      ctx.destroyed = true;
       if (ctx.liveTimer) clearInterval(ctx.liveTimer);
-      if (ctx.raf) cancelAnimationFrame(ctx.raf);
-      window.removeEventListener("resize", onResize);
+      if (ctx.rafId != null) cancelAnimationFrame(ctx.rafId);
+      if (bufTimer) clearTimeout(bufTimer);
+      if (zoomTimer) clearTimeout(zoomTimer);
+      if (ro) ro.disconnect();
       window.removeEventListener("vmc-theme", onTheme);
       document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
     },
   };
-}
-
-function roundRect(g, x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
-  g.beginPath();
-  g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r);
-  g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r);
-  g.arcTo(x, y, x + w, y, r);
-  g.closePath();
 }
