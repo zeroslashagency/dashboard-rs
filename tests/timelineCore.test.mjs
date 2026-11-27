@@ -106,3 +106,74 @@ test("summarizeLaneWindow, summarizeFleetWindow, and computeMinimapBins aggregat
   assert.ok(bins[0].runFrac > 0.9);
   assert.ok(bins[15].lossFrac > 0.9);
 });
+
+import {
+  buildFullNcReport,
+  buildSingleJobReport,
+  computeSegmentedMeter,
+  resolveNcContext,
+} from "../web/js/timelineCore.js";
+
+test("resolveNcContext links Single Job clicks and Full NC clicks seamlessly", () => {
+  const t0 = 1_700_000_000_000;
+  const parts = [
+    { groupId: "g1", program: "LH_028_1ST_OP.NC", job: 101, t0, t1: t0 + 1200e3, dur: 1200e3, baseline: 1200, dev: 1.0, partial: false },
+    { groupId: "g1", program: "LH_028_1ST_OP.NC", job: 102, t0: t0 + 1300e3, t1: t0 + 2980e3, dur: 1680e3, baseline: 1200, dev: 1.4, partial: false },
+  ];
+  const groups = [
+    { groupId: "g1", program: "LH_028_1ST_OP.NC", t0, t1: t0 + 2980e3, count: 2, baseline: 1200 },
+  ];
+  const lane = { id: "VMC-03", parts, groups, bands: [] };
+
+  const fromPart = resolveNcContext(lane, { type: "part", data: parts[1] });
+  assert.equal(fromPart.defaultTab, "job");
+  assert.equal(fromPart.group.groupId, "g1");
+  assert.equal(fromPart.groupParts.length, 2);
+  assert.equal(fromPart.selectedPart.job, 102);
+
+  const fromGroup = resolveNcContext(lane, { type: "group", data: groups[0] });
+  assert.equal(fromGroup.defaultTab, "nc");
+  assert.equal(fromGroup.selectedPart.job, 102);
+});
+
+test("buildFullNcReport and buildSingleJobReport compute accurate meters, mini-strip, and 5-axis radar", () => {
+  const t0 = 1_700_000_000_000;
+  const parts = [
+    { groupId: "g1", program: "HSG_402.NC", job: 1, t0, t1: t0 + 1000e3, dur: 1000e3, baseline: 1000, dev: 1.0, partial: false },
+    { groupId: "g1", program: "HSG_402.NC", job: 2, t0: t0 + 1100e3, t1: t0 + 2150e3, dur: 1050e3, baseline: 1000, dev: 1.05, partial: false },
+    { groupId: "g1", program: "HSG_402.NC", job: 3, t0: t0 + 2400e3, t1: t0 + 3800e3, dur: 1400e3, baseline: 1000, dev: 1.4, partial: false },
+  ];
+  const group = { groupId: "g1", program: "HSG_402.NC", t0, t1: t0 + 3800e3, count: 3, baseline: 1000 };
+  const events = [
+    { machine: "VMC-08", ts: t0 + 2900e3, sev: "WARNING", rule: "feed_hold", msg: "Feed hold dipped to 70%" },
+  ];
+
+  const fullNc = buildFullNcReport({ group, groupParts: parts, bands: [], events });
+  assert.equal(fullNc.programName, "HSG_402");
+  assert.equal(fullNc.totalJobs, 3);
+  assert.equal(fullNc.qualityCounts.normal, 2);
+  assert.equal(fullNc.qualityCounts.over, 1);
+  assert.equal(fullNc.meter.segs.length, 24);
+  assert.equal(fullNc.jobRows.length, 3);
+  assert.equal(fullNc.jobRows[0].job, 3); // newest first
+  assert.ok(fullNc.miniStrip.some((b) => b.kind === "gap"));
+  assert.equal(fullNc.incidents.length, 1);
+
+  const singleOver = buildSingleJobReport({ part: parts[2], fullNc, events, overview: { overrides: { feed: 90 }, tool_id: "T11" } });
+  assert.equal(singleOver.statusKind, "over");
+  assert.equal(singleOver.devPct, 40);
+  assert.equal(singleOver.preGapMs, 250e3);
+  assert.equal(singleOver.radar.length, 5);
+  assert.equal(singleOver.badge.tone, "danger");
+  assert.ok(singleOver.radar.find((a) => a.label === "Pace").job < 80);
+
+  const singleNom = buildSingleJobReport({ part: parts[0], fullNc, events, overview: { overrides: { feed: 100 } } });
+  assert.equal(singleNom.statusKind, "normal");
+  assert.equal(singleNom.badge.tone, "success");
+  assert.ok(singleNom.radar.find((a) => a.label === "Pace").job >= 90);
+
+  const meter = computeSegmentedMeter(50, "success", 24);
+  assert.equal(meter.filled, 12);
+  assert.equal(meter.segs.filter((s) => s.active).length, 12);
+});
+

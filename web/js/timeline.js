@@ -14,7 +14,7 @@
  */
 
 import { fleetStore } from "./fleetStoreClient.js";
-import { DOWNTIME_REASONS } from "./fleetCore.js";
+import { renderTimelinePopup } from "./timelinePopup.js";
 import {
   IST_OFFSET_MS,
   NORMAL_DEV,
@@ -30,6 +30,8 @@ import {
   fmtDurCompact,
   fmtIsoDateIST,
   partDeviationKind,
+  partKeyOf,
+  resolveNcContext,
   shiftLabelForTs,
   summarizeFleetWindow,
   summarizeLaneWindow,
@@ -1122,8 +1124,10 @@ export function mountTimeline(body, dataLayer) {
   }
 
   // ---- Bootstrap & Live 1Hz Tick ----
+  let bootInFlight = false;
   async function loadOverviewAndBoot(forceBuffer) {
-    const my = ++ctx.token;
+    if (bootInFlight) return;
+    bootInFlight = true;
     paintWinLabel();
     syncPresetBtns();
     try {
@@ -1131,7 +1135,7 @@ export function mountTimeline(body, dataLayer) {
         dataLayer.overview(),
         fleetStore.load().catch(() => fleetStore.getCached()),
       ]);
-      if (ctx.destroyed || my !== ctx.token) return;
+      if (ctx.destroyed) return;
       ctx.downtimeLogs = Array.isArray(storeState?.downtimeLogs) ? storeState.downtimeLogs : [];
       const machines = (Array.isArray(ov.machines) ? ov.machines : []).map((m) => ({
         id: m.machine_id,
@@ -1163,6 +1167,8 @@ export function mountTimeline(body, dataLayer) {
         refs.note.textContent = "Collector unreachable — retrying…";
         refs.note.hidden = false;
       }
+    } finally {
+      bootInFlight = false;
     }
   }
 
@@ -2078,8 +2084,8 @@ export function mountTimeline(body, dataLayer) {
   function placePopup(clientX, clientY) {
     const el = refs.drawer;
     const r = el.getBoundingClientRect();
-    const w = r.width || 368;
-    const h = r.height || 360;
+    const w = r.width || 448;
+    const h = r.height || 460;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const nav = document.querySelector(".godnav");
@@ -2091,7 +2097,7 @@ export function mountTimeline(body, dataLayer) {
     if (x + w > vw - MARGIN) x = clientX - w - GAP;
     x = Math.max(MARGIN, Math.min(vw - w - MARGIN, x));
 
-    let y = clientY - Math.min(h * 0.35, 140);
+    let y = clientY - Math.min(h * 0.35, 160);
     if (y + h > vh - MARGIN) y = vh - h - MARGIN;
     if (y < topBound) y = topBound;
 
@@ -2109,209 +2115,66 @@ export function mountTimeline(body, dataLayer) {
     openDrawer(lane, hit, e.clientX, e.clientY);
   }
 
+  function renderActivePopup() {
+    const item = ctx.drawerItem;
+    if (!item) return;
+    renderTimelinePopup({
+      refs,
+      state: {
+        lane: item.lane,
+        hit: item.hit,
+        activeTab: item.activeTab,
+        ncCtx: item.ncCtx,
+        overview: ctx.over.get(item.lane.id) || null,
+        laneEvents: ctx.events.get(item.lane.id) || [],
+        fleetStore,
+      },
+      actions: {
+        switchTab(tabId) {
+          if (!ctx.drawerItem) return;
+          ctx.drawerItem.activeTab = tabId;
+          renderActivePopup();
+        },
+        selectPartById(partId) {
+          if (!ctx.drawerItem) return;
+          const nc = ctx.drawerItem.ncCtx;
+          if (partId === "__LIVE__" && nc?.liveMeta) {
+            nc.selectedPart = null;
+          } else if (nc?.groupParts) {
+            const found = nc.groupParts.find((p) => partKeyOf(p) === partId);
+            if (found) nc.selectedPart = found;
+          }
+          ctx.drawerItem.activeTab = "job";
+          renderActivePopup();
+        },
+        selectPartRef(partRef) {
+          if (!ctx.drawerItem || !partRef) return;
+          if (ctx.drawerItem.ncCtx) ctx.drawerItem.ncCtx.selectedPart = partRef;
+          ctx.drawerItem.activeTab = "job";
+          renderActivePopup();
+        },
+        onDowntimeMutated(nextLogs) {
+          ctx.downtimeLogs = nextLogs;
+          markDirty({ lanes: true, summary: true });
+          closeDrawer();
+        },
+      },
+    });
+    placePopup(item.anchorX, item.anchorY);
+  }
+
   function openDrawer(lane, hit, clientX = window.innerWidth / 2, clientY = 180) {
-    ctx.drawerItem = { lane, hit };
+    const ncCtx = resolveNcContext(lane, hit, ctx.over.get(lane.id) || null);
+    ctx.drawerItem = {
+      lane,
+      hit,
+      ncCtx,
+      activeTab: ncCtx.defaultTab,
+      anchorX: clientX,
+      anchorY: clientY,
+    };
     refs.drawerBackdrop.hidden = false;
-    const finishPlace = () => placePopup(clientX, clientY);
-
-    if (hit.type === "gap") {
-      const gap = hit.data;
-      const durMin = Math.max(1, Math.round(gap.durMs / 60e3));
-      const shiftLbl = shiftLabelForTs(gap.t0);
-      refs.drawerTitle.textContent = `${lane.name} · ${statusLabel(gap.status)} Gap`;
-      refs.drawerSub.textContent = `${fmtDayIST(gap.t0)} · ${fmtClockSecIST(gap.t0)} → ${fmtClockSecIST(gap.t1)} IST`;
-
-      const evRows = gap.events.length
-        ? gap.events.map((ev) => `<div class="tl2-ev-row"><span class="tl2-ev-time">${fmtClockSecIST(ev.ts)}</span><span>${escHtml(ev.msg || ev.rule)}</span></div>`).join("")
-        : `<div style="font-size:12px;color:var(--tl2-muted)">No controller alarm or override events overlapped this gap.</div>`;
-
-      const existingHtml = gap.logged
-        ? `<div class="tl2-dsec">
-            <div class="tl2-dsec-h">Logged Shop-Floor Cause</div>
-            <div class="tl2-dkv-grid">
-              <div class="tl2-dkv"><span>Reason</span><strong>${escHtml(gap.logged.reason)}</strong></div>
-              <div class="tl2-dkv"><span>Duration</span><strong>${gap.logged.durationMin} min</strong></div>
-              ${gap.logged.operator ? `<div class="tl2-dkv"><span>Operator</span><strong>${escHtml(gap.logged.operator)}</strong></div>` : ""}
-              ${gap.logged.note ? `<div class="tl2-dkv" style="grid-column:1/-1"><span>Note</span><strong>${escHtml(gap.logged.note)}</strong></div>` : ""}
-            </div>
-            <button type="button" class="tl2-btn" data-df="delGapLog" style="align-self:flex-start;margin-top:4px">Remove Logged Cause</button>
-          </div>`
-        : "";
-
-      const reasonOpts = DOWNTIME_REASONS.map((r) => `<option value="${escHtml(r)}">${escHtml(r)}</option>`).join("");
-      refs.drawerBody.innerHTML = `
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Gap Telemetry Summary</div>
-          <div class="tl2-dkv-grid">
-            <div class="tl2-dkv"><span>Controller State</span><strong>${statusLabel(gap.status)}</strong></div>
-            <div class="tl2-dkv"><span>Duration</span><strong>${fmtDurCompact(gap.durMs)}</strong></div>
-            <div class="tl2-dkv"><span>Shift</span><strong>${escHtml(shiftLbl)}</strong></div>
-            <div class="tl2-dkv"><span>Accountability</span><strong>${gap.logged ? "Logged" : "Unclassified"}</strong></div>
-          </div>
-        </div>
-        ${existingHtml}
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">${gap.logged ? "Log Additional Cause" : "Log Downtime Root Cause"}</div>
-          <form class="tl2-form" data-df="gapForm">
-            <label class="tl2-field">
-              <span>Root Cause Category</span>
-              <select class="tl2-select" name="reason" required>${reasonOpts}</select>
-            </label>
-            <label class="tl2-field">
-              <span>Duration (minutes)</span>
-              <input class="tl2-input" type="number" name="durationMin" min="1" max="1440" value="${durMin}" required />
-            </label>
-            <label class="tl2-field">
-              <span>Operator (optional)</span>
-              <input class="tl2-input" type="text" name="operator" maxlength="60" placeholder="e.g. R. Sharma" />
-            </label>
-            <label class="tl2-field">
-              <span>Shop-Floor Note (optional)</span>
-              <textarea class="tl2-textarea" name="note" maxlength="280" placeholder="Fixture adjustment, tool insert change, waiting for raw stock…"></textarea>
-            </label>
-            <button type="submit" class="tl2-submit-btn">Save to Fleet Intelligence Log</button>
-          </form>
-        </div>
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Overlapping Controller Events</div>
-          <div class="tl2-ev-list">${evRows}</div>
-        </div>
-      `;
-
-      const delBtn = refs.drawerBody.querySelector('[data-df="delGapLog"]');
-      if (delBtn && gap.logged) {
-        delBtn.addEventListener("click", async () => {
-          delBtn.disabled = true;
-          try {
-            const st = await fleetStore.deleteDowntime(gap.logged.id);
-            ctx.downtimeLogs = st.downtimeLogs || [];
-            markDirty({ lanes: true, summary: true });
-            closeDrawer();
-          } catch {
-            delBtn.disabled = false;
-          }
-        });
-      }
-
-      const form = refs.drawerBody.querySelector('[data-df="gapForm"]');
-      if (form) {
-        form.addEventListener("submit", async (ev) => {
-          ev.preventDefault();
-          const btn = form.querySelector("button[type=submit]");
-          btn.disabled = true;
-          btn.textContent = "Saving…";
-          const fd = new FormData(form);
-          try {
-            const st = await fleetStore.addDowntime({
-              machineId: lane.id,
-              reason: String(fd.get("reason") || "Other"),
-              durationMin: Math.max(1, Number(fd.get("durationMin")) || durMin),
-              startTs: Math.round(gap.t0),
-              shiftLabel: shiftLbl,
-              operator: String(fd.get("operator") || "").trim(),
-              note: String(fd.get("note") || "").trim(),
-            });
-            ctx.downtimeLogs = st.downtimeLogs || [];
-            markDirty({ lanes: true, summary: true });
-            closeDrawer();
-          } catch (err) {
-            btn.disabled = false;
-            btn.textContent = `Save failed — retry`;
-          }
-        });
-      }
-      finishPlace();
-      return;
-    }
-
-    if (hit.type === "group") {
-      const grp = hit.data;
-      const parts = lane.parts.filter((p) => p.groupId === grp.groupId);
-      const done = parts.filter((p) => !p.partial && p.dur > 0);
-      const cutMs = parts.reduce((a, p) => a + (p.dur || 0), 0);
-      const wallMs = Math.max(1, grp.t1 - grp.t0);
-      const idleMs = Math.max(0, wallMs - cutMs);
-      const util = Math.min(100, Math.round((cutMs / wallMs) * 100));
-      const maxDur = Math.max(1, ...done.map((p) => p.dur));
-      const spark = done.slice(-48).map((p) => {
-        const k = partDeviationKind(p);
-        return `<i class="k-${k}" style="height:${Math.max(10, Math.round((p.dur / maxDur) * 100))}%"></i>`;
-      }).join("");
-      const evs = (ctx.events.get(lane.id) || []).filter((e) => e.ts >= grp.t0 && e.ts <= grp.t1);
-
-      refs.drawerTitle.textContent = String(grp.program || "Program Run").replace(/\.nc$/i, "");
-      refs.drawerSub.textContent = `${lane.name} · ${grp.count} jobs · ${fmtClockIST(grp.t0)} → ${fmtClockIST(grp.t1)} IST`;
-      refs.drawerBody.innerHTML = `
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Run Summary</div>
-          <div class="tl2-dkv-grid">
-            <div class="tl2-dkv"><span>Cutting Time</span><strong>${fmtDurCompact(cutMs)} (${util}%)</strong></div>
-            <div class="tl2-dkv"><span>Inter-Cycle Gaps</span><strong>${fmtDurCompact(idleMs)}</strong></div>
-            <div class="tl2-dkv"><span>Completed Jobs</span><strong>${done.length}</strong></div>
-            <div class="tl2-dkv"><span>Learned Baseline</span><strong>${grp.baseline ? fmtDurCompact(grp.baseline * 1000) : "Pending"}</strong></div>
-          </div>
-        </div>
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Cycle Duration Profile (${done.length} cycles)</div>
-          <div class="tl2-spark">${spark || '<span style="font-size:12px;color:var(--tl2-muted)">No completed cycles in run</span>'}</div>
-        </div>
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Incidents During Run (${evs.length})</div>
-          <div class="tl2-ev-list">
-            ${evs.length
-              ? evs.map((e) => `<div class="tl2-ev-row"><span class="tl2-ev-time">${fmtClockSecIST(e.ts)}</span><span>${escHtml(e.msg || e.rule)}</span></div>`).join("")
-              : `<div style="font-size:12px;color:var(--tl2-emerald)">Clean run — no E-stops or override dips recorded.</div>`}
-          </div>
-        </div>
-      `;
-      finishPlace();
-      return;
-    }
-
-    if (hit.type === "part") {
-      const p = hit.data;
-      const evs = (ctx.events.get(lane.id) || []).filter((e) => e.ts >= p.t0 && e.ts <= p.t1);
-      const pct = p.dev != null ? Math.round((p.dev - 1) * 100) : null;
-      refs.drawerTitle.textContent = `${lane.name} · Job #${p.job ?? "—"}`;
-      refs.drawerSub.textContent = `${String(p.program || "—").replace(/\.nc$/i, "")} · ${fmtClockSecIST(p.t0)} → ${fmtClockSecIST(p.t1)} IST`;
-      refs.drawerBody.innerHTML = `
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Cycle Metrics</div>
-          <div class="tl2-dkv-grid">
-            <div class="tl2-dkv"><span>Actual Duration</span><strong>${fmtDurCompact(p.dur)}</strong></div>
-            <div class="tl2-dkv"><span>Baseline</span><strong>${p.baseline ? fmtDurCompact(p.baseline * 1000) : "—"}</strong></div>
-            <div class="tl2-dkv"><span>Deviation</span><strong>${pct != null ? `${pct >= 0 ? "+" : ""}${pct}%` : "—"}</strong></div>
-            <div class="tl2-dkv"><span>Band</span><strong>${hit.kind === "over" ? "Overrun (>+30%)" : hit.kind === "high" ? "Mild Slow (+15%)" : hit.kind === "low" ? "Short (-15%)" : "Nominal"}</strong></div>
-          </div>
-        </div>
-        <div class="tl2-dsec">
-          <div class="tl2-dsec-h">Overlapping Controller Events (${evs.length})</div>
-          <div class="tl2-ev-list">
-            ${evs.length
-              ? evs.map((e) => `<div class="tl2-ev-row"><span class="tl2-ev-time">${fmtClockSecIST(e.ts)}</span><span>${escHtml(e.msg || e.rule)}</span></div>`).join("")
-              : `<div style="font-size:12px;color:var(--tl2-emerald)">No interruptions during this cycle.</div>`}
-          </div>
-        </div>
-      `;
-      finishPlace();
-      return;
-    }
-
-    if (hit.type === "pin") {
-      const ev = hit.data;
-      refs.drawerTitle.textContent = `${lane.name} · Controller Event`;
-      refs.drawerSub.textContent = `${fmtDayIST(ev.ts)} · ${fmtClockSecIST(ev.ts)} IST`;
-      refs.drawerBody.innerHTML = `
-        <div class="tl2-dsec">
-          <div class="tl2-dkv-grid">
-            <div class="tl2-dkv"><span>Severity</span><strong>${escHtml(ev.sev || "INFO")}</strong></div>
-            <div class="tl2-dkv"><span>Rule</span><strong>${escHtml(ev.rule || "event")}</strong></div>
-            <div class="tl2-dkv" style="grid-column:1/-1"><span>Message</span><strong>${escHtml(ev.msg || ev.rule)}</strong></div>
-          </div>
-        </div>
-      `;
-      finishPlace();
-    }
+    renderActivePopup();
   }
 
   function closeDrawer() {
@@ -2369,6 +2232,11 @@ export function mountTimeline(body, dataLayer) {
     refresh() {
       if (ctx.destroyed || ctx.dragging) return;
       if (!refs.board || !refs.board.offsetParent) return;
+      if (bootInFlight) return;
+      if (!ctx.machines.length) {
+        loadOverviewAndBoot(true);
+        return;
+      }
       fleetStore.load().then((st) => {
         if (!ctx.destroyed && st && Array.isArray(st.downtimeLogs)) {
           ctx.downtimeLogs = st.downtimeLogs;

@@ -410,3 +410,672 @@ export function fmtDurCompact(ms) {
   if (m > 0) return `${m}m ${pad2(s % 60)}s`;
   return `${s}s`;
 }
+
+export function fmtClockHero(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return { main: `${h}:${pad2(m)}`, sub: pad2(s), unit: "h:m" };
+  return { main: `${m}:${pad2(s)}`, sub: "", unit: "m:s" };
+}
+
+export function partKeyOf(p) {
+  if (!p) return "";
+  return `${Math.round((p.t0 || 0) / 1000)}|${p.job ?? ""}`;
+}
+
+export function cleanProgName(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "Unknown NC";
+  return s.replace(/\.nc$/i, "");
+}
+
+function quantileSorted(sorted, q) {
+  if (!sorted.length) return null;
+  if (sorted.length === 1) return sorted[0];
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+/**
+ * Tactile badge metadata (tone, label, icon) for cycle, run, or gap status.
+ */
+export function healthBadgeForKind(kind) {
+  switch (kind) {
+    case "normal":
+    case "success":
+    case "logged":
+      return {
+        tone: "success",
+        label: kind === "logged" ? "Logged" : "Nominal",
+        icon: "check",
+      };
+    case "high":
+    case "paused":
+    case "pending":
+      return {
+        tone: "warning",
+        label: kind === "paused" ? "Feed-Hold" : kind === "pending" ? "Unclassified" : "Slow +15%",
+        icon: "alert",
+      };
+    case "over":
+    case "alarm":
+    case "failed":
+      return {
+        tone: "danger",
+        label: kind === "alarm" ? "Alarm" : "Overrun",
+        icon: "x",
+      };
+    case "live":
+    case "active":
+      return {
+        tone: "info",
+        label: "Live Cutting",
+        icon: "arrow",
+      };
+    case "low":
+      return {
+        tone: "info",
+        label: "Short Cycle",
+        icon: "arrow",
+      };
+    case "partial":
+      return {
+        tone: "neutral",
+        label: "Partial",
+        icon: "clock",
+      };
+    case "offline":
+      return {
+        tone: "neutral",
+        label: "Offline",
+        icon: "clock",
+      };
+    case "idle":
+    default:
+      return {
+        tone: "neutral",
+        label: kind === "idle" ? "Idle Gap" : "Baseline",
+        icon: "clock",
+      };
+  }
+}
+
+/**
+ * Build a 24-tick LED-style segmented efficiency/utilization gauge model.
+ */
+export function computeSegmentedMeter(pct, tone = "success", count = 24) {
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const filled = Math.round((clamped / 100) * count);
+  const segs = [];
+  for (let i = 0; i < count; i++) {
+    const active = i < filled;
+    let segTone = "empty";
+    if (active) {
+      if (tone === "danger") segTone = i < Math.floor(count * 0.65) ? "amber" : "crimson";
+      else if (tone === "warning") segTone = i < Math.floor(count * 0.72) ? "emerald" : "amber";
+      else if (tone === "info") segTone = "cobalt";
+      else segTone = "emerald";
+    }
+    segs.push({ active, tone: segTone });
+  }
+  return { pct: Math.round(clamped), filled, count, segs };
+}
+
+/**
+ * Link any timeline click target (part, live, group, gap, pin) to its parent NC run
+ * and default Single Job selection so operators can switch seamlessly between tabs.
+ */
+export function resolveNcContext(lane, hit, overview = null) {
+  const parts = Array.isArray(lane?.parts) ? lane.parts : [];
+  const groups = Array.isArray(lane?.groups) ? lane.groups : [];
+  const bands = Array.isArray(lane?.bands) ? lane.bands : [];
+
+  const findGroupForPart = (p) => {
+    if (!p) return null;
+    if (p.groupId != null) {
+      const byId = groups.find((g) => g.groupId === p.groupId);
+      if (byId) return byId;
+    }
+    const bySpan = groups.find((g) => p.t0 >= g.t0 - 5000 && p.t1 <= g.t1 + 5000 && g.program === p.program);
+    if (bySpan) return bySpan;
+    const sameProg = parts.filter((x) => x.program && x.program === p.program);
+    if (sameProg.length) {
+      return {
+        groupId: p.groupId ?? `virt_${p.program}`,
+        program: p.program,
+        t0: Math.min(...sameProg.map((x) => x.t0)),
+        t1: Math.max(...sameProg.map((x) => x.t1)),
+        count: sameProg.length,
+        baseline: p.baseline ?? null,
+      };
+    }
+    return {
+      groupId: p.groupId ?? `virt_single_${Math.round(p.t0 / 1000)}`,
+      program: p.program || "Program",
+      t0: p.t0,
+      t1: p.t1,
+      count: 1,
+      baseline: p.baseline ?? null,
+    };
+  };
+
+  const partsForGroup = (grp) => {
+    if (!grp) return [];
+    let matched = parts.filter((p) => p.groupId != null && p.groupId === grp.groupId);
+    if (!matched.length) {
+      matched = parts.filter(
+        (p) =>
+          p.t0 >= grp.t0 - 5000 &&
+          p.t1 <= grp.t1 + 5000 &&
+          (!grp.program || !p.program || p.program === grp.program),
+      );
+    }
+    return matched.slice().sort((a, b) => a.t0 - b.t0);
+  };
+
+  const buildLiveMeta = (ov) => {
+    if (!ov) return null;
+    const c = ov.cycle || {};
+    const elapsedSec = Number(c.this_cycle);
+    const remSec = Number(c.remaining_cycle_time);
+    const nowMs = Date.now();
+    const durMs = Number.isFinite(elapsedSec) && elapsedSec > 0 ? elapsedSec * 1000 : 0;
+    const remainingMs = Number.isFinite(remSec) && remSec >= 0 ? remSec * 1000 : null;
+    const totalEstMs = remainingMs != null ? durMs + remainingMs : null;
+    return {
+      isLive: true,
+      program: ov.active_program || "Active Program",
+      t0: nowMs - durMs,
+      t1: nowMs,
+      durMs,
+      remainingMs,
+      totalEstMs,
+      status: ov.status || "running",
+      spindleRpm: Number.isFinite(ov.spindle_speed) ? Math.round(ov.spindle_speed) : null,
+      feedOvrd: Number.isFinite(ov.overrides?.feed) ? Math.round(ov.overrides.feed) : null,
+      spindleOvrd: Number.isFinite(ov.overrides?.spindle) ? Math.round(ov.overrides.spindle) : null,
+      rapidOvrd: Number.isFinite(ov.overrides?.rapid) ? Math.round(ov.overrides.rapid) : null,
+      partCount: ov.part_count ?? null,
+      targetQty: ov.target_part_qty ?? null,
+      toolId: ov.tool_id || null,
+    };
+  };
+
+  if (hit.type === "part") {
+    const selectedPart = hit.data;
+    const group = findGroupForPart(selectedPart);
+    const groupParts = partsForGroup(group);
+    return {
+      defaultTab: "job",
+      group,
+      groupParts: groupParts.length ? groupParts : [selectedPart],
+      selectedPart,
+      liveMeta: null,
+      bands,
+    };
+  }
+
+  if (hit.type === "live") {
+    const ov = hit.data || overview;
+    const liveMeta = buildLiveMeta(ov);
+    const activeProg = liveMeta?.program;
+    let group = null;
+    for (let i = groups.length - 1; i >= 0; i--) {
+      if (!activeProg || groups[i].program === activeProg) {
+        group = groups[i];
+        break;
+      }
+    }
+    if (!group && liveMeta) {
+      group = {
+        groupId: `live_${activeProg || "run"}`,
+        program: activeProg || "Active Program",
+        t0: liveMeta.t0,
+        t1: liveMeta.t1,
+        count: 1,
+        baseline: liveMeta.totalEstMs ? liveMeta.totalEstMs / 1000 : null,
+      };
+    }
+    const groupParts = partsForGroup(group);
+    return {
+      defaultTab: "job",
+      group,
+      groupParts,
+      selectedPart: null,
+      liveMeta,
+      bands,
+    };
+  }
+
+  if (hit.type === "group") {
+    const group = hit.data;
+    const groupParts = partsForGroup(group);
+    // Default Single Job selection when user clicks the Single Job tab: newest completed job (or last part)
+    const completed = groupParts.filter((p) => !p.partial && p.dur > 0);
+    const selectedPart = completed.length
+      ? completed[completed.length - 1]
+      : (groupParts[groupParts.length - 1] || null);
+    return {
+      defaultTab: "nc",
+      group,
+      groupParts,
+      selectedPart,
+      liveMeta: null,
+      bands,
+    };
+  }
+
+  if (hit.type === "gap") {
+    const gap = hit.data;
+    // Find overlapping or closest preceding NC group within 2 hours for optional Full NC context tab
+    let group = groups.find((g) => g.t0 <= gap.t1 && g.t1 >= gap.t0) || null;
+    if (!group) {
+      let bestDist = 2 * 3600e3;
+      for (const g of groups) {
+        const dist = gap.t0 >= g.t1 ? gap.t0 - g.t1 : (g.t0 >= gap.t1 ? g.t0 - gap.t1 : 0);
+        if (dist < bestDist) {
+          bestDist = dist;
+          group = g;
+        }
+      }
+    }
+    const groupParts = partsForGroup(group);
+    const selectedPart = groupParts.length ? groupParts[groupParts.length - 1] : null;
+    return {
+      defaultTab: "gap",
+      group,
+      groupParts,
+      selectedPart,
+      liveMeta: null,
+      bands,
+    };
+  }
+
+  // Event pin
+  const ev = hit.data;
+  const group = ev ? (groups.find((g) => ev.ts >= g.t0 - 15e3 && ev.ts <= g.t1 + 15e3) || null) : null;
+  const groupParts = partsForGroup(group);
+  const selectedPart = ev ? (groupParts.find((p) => ev.ts >= p.t0 && ev.ts <= p.t1) || groupParts[groupParts.length - 1] || null) : null;
+  return {
+    defaultTab: "pin",
+    group,
+    groupParts,
+    selectedPart,
+    liveMeta: null,
+    bands,
+  };
+}
+
+/**
+ * Compute Full NC program run analytics, mini-timeline strip geometry, quality split,
+ * 24-segment cutting utilization meter, and clickable job list.
+ */
+export function buildFullNcReport({ group, groupParts = [], bands = [], events = [], liveMeta = null }) {
+  if (!group && !groupParts.length && !liveMeta) return null;
+
+  const sortedParts = groupParts.slice().sort((a, b) => a.t0 - b.t0);
+  const t0Candidates = [];
+  const t1Candidates = [];
+  if (group && Number.isFinite(group.t0)) t0Candidates.push(group.t0);
+  if (group && Number.isFinite(group.t1)) t1Candidates.push(group.t1);
+  if (sortedParts.length) {
+    t0Candidates.push(sortedParts[0].t0);
+    t1Candidates.push(sortedParts[sortedParts.length - 1].t1);
+  }
+  if (liveMeta) {
+    t0Candidates.push(liveMeta.t0);
+    t1Candidates.push(liveMeta.t1);
+  }
+  const t0 = t0Candidates.length ? Math.min(...t0Candidates) : Date.now() - 60e3;
+  const t1 = Math.max(t0 + 1000, t1Candidates.length ? Math.max(...t1Candidates) : Date.now());
+  const wallMs = Math.max(1000, t1 - t0);
+
+  const completed = sortedParts.filter((p) => !p.partial && Number.isFinite(p.dur) && p.dur > 0);
+  const dursSorted = completed.map((p) => p.dur).sort((a, b) => a - b);
+  const medianMs = quantileSorted(dursSorted, 0.5);
+  const p10Ms = quantileSorted(dursSorted, 0.1);
+  const p90Ms = quantileSorted(dursSorted, 0.9);
+  const minMs = dursSorted.length ? dursSorted[0] : null;
+  const maxMs = dursSorted.length ? dursSorted[dursSorted.length - 1] : null;
+  const avgMs = dursSorted.length ? dursSorted.reduce((a, b) => a + b, 0) / dursSorted.length : null;
+  const baselineMs = group?.baseline
+    ? group.baseline * 1000
+    : (completed.find((p) => p.baseline)?.baseline
+      ? completed.find((p) => p.baseline).baseline * 1000
+      : medianMs);
+
+  let cutMs = sortedParts.reduce((a, p) => a + Math.max(0, p.dur || (p.t1 - p.t0) || 0), 0);
+  if (liveMeta && liveMeta.durMs > 0) cutMs += liveMeta.durMs;
+  cutMs = Math.min(wallMs, cutMs);
+  const gapMs = Math.max(0, wallMs - cutMs);
+  const utilPct = Math.max(0, Math.min(100, Math.round((cutMs / wallMs) * 100)));
+
+  const qualityCounts = { normal: 0, high: 0, over: 0, low: 0, partial: 0, neutral: 0, live: liveMeta ? 1 : 0 };
+  for (const p of sortedParts) {
+    const k = partDeviationKind(p);
+    qualityCounts[k] = (qualityCounts[k] || 0) + 1;
+  }
+
+  const incidents = (Array.isArray(events) ? events : [])
+    .filter((e) => e && e.ts >= t0 - 10e3 && e.ts <= t1 + 10e3 && e.rule !== "program")
+    .sort((a, b) => b.ts - a.ts);
+
+  // Build proportional mini-strip blocks across [t0, t1]
+  const miniStrip = [];
+  let cursor = t0;
+  for (let i = 0; i < sortedParts.length; i++) {
+    const p = sortedParts[i];
+    if (p.t0 > cursor + 15_000) {
+      const gapBand = bands.find((b) => b && b.status !== "running" && b.t1 > cursor && b.t0 < p.t0);
+      miniStrip.push({
+        kind: "gap",
+        id: `gap_${i}`,
+        t0: cursor,
+        t1: p.t0,
+        durMs: p.t0 - cursor,
+        leftPct: ((cursor - t0) / wallMs) * 100,
+        widthPct: ((p.t0 - cursor) / wallMs) * 100,
+        statusKind: gapBand ? String(gapBand.status || "idle").toLowerCase() : "idle",
+      });
+    }
+    const stKind = partDeviationKind(p);
+    miniStrip.push({
+      kind: "part",
+      id: partKeyOf(p),
+      job: p.job,
+      index: i + 1,
+      t0: p.t0,
+      t1: p.t1,
+      durMs: p.dur || Math.max(0, p.t1 - p.t0),
+      leftPct: Math.max(0, ((p.t0 - t0) / wallMs) * 100),
+      widthPct: Math.max(0.8, ((Math.max(1000, p.t1 - p.t0)) / wallMs) * 100),
+      statusKind: stKind,
+      partRef: p,
+    });
+    cursor = Math.max(cursor, p.t1);
+  }
+  if (liveMeta) {
+    if (liveMeta.t0 > cursor + 15_000) {
+      miniStrip.push({
+        kind: "gap",
+        id: "gap_live",
+        t0: cursor,
+        t1: liveMeta.t0,
+        durMs: liveMeta.t0 - cursor,
+        leftPct: ((cursor - t0) / wallMs) * 100,
+        widthPct: ((liveMeta.t0 - cursor) / wallMs) * 100,
+        statusKind: "idle",
+      });
+    }
+    miniStrip.push({
+      kind: "live",
+      id: "__LIVE__",
+      job: "LIVE",
+      index: sortedParts.length + 1,
+      t0: liveMeta.t0,
+      t1: liveMeta.t1,
+      durMs: liveMeta.durMs,
+      leftPct: Math.max(0, ((liveMeta.t0 - t0) / wallMs) * 100),
+      widthPct: Math.max(2, ((Math.max(1000, liveMeta.t1 - liveMeta.t0)) / wallMs) * 100),
+      statusKind: "live",
+    });
+  }
+
+  // Clickable chronological job rows (newest first, matching precision tracker list)
+  const jobRows = [];
+  if (liveMeta) {
+    jobRows.push({
+      id: "__LIVE__",
+      isLive: true,
+      jobLabel: "Live Cycle",
+      t0: liveMeta.t0,
+      t1: liveMeta.t1,
+      durMs: liveMeta.durMs,
+      devPct: null,
+      statusKind: "live",
+      badge: healthBadgeForKind("live"),
+    });
+  }
+  for (let i = sortedParts.length - 1; i >= 0; i--) {
+    const p = sortedParts[i];
+    const stKind = partDeviationKind(p);
+    const devPct = p.dev != null && Number.isFinite(p.dev)
+      ? Math.round((p.dev - 1) * 100)
+      : (baselineMs && p.dur ? Math.round(((p.dur / baselineMs) - 1) * 100) : null);
+    jobRows.push({
+      id: partKeyOf(p),
+      isLive: false,
+      job: p.job,
+      orderIndex: i + 1,
+      jobLabel: p.job != null ? `Job #${p.job}` : `Cycle #${i + 1}`,
+      t0: p.t0,
+      t1: p.t1,
+      durMs: p.dur || Math.max(0, p.t1 - p.t0),
+      devPct,
+      statusKind: stKind,
+      badge: healthBadgeForKind(stKind),
+      partRef: p,
+    });
+  }
+
+  const badCount = qualityCounts.over + qualityCounts.high;
+  const runTone = qualityCounts.over > 0 || incidents.some((e) => e.sev === "CRITICAL")
+    ? "danger"
+    : (badCount > 0 || utilPct < 65 ? "warning" : "success");
+  const healthBadge = liveMeta && !sortedParts.length
+    ? healthBadgeForKind("live")
+    : (runTone === "danger"
+      ? { tone: "danger", label: `${qualityCounts.over} Overrun${qualityCounts.over === 1 ? "" : "s"}`, icon: "x" }
+      : runTone === "warning"
+        ? { tone: "warning", label: `${utilPct}% Cutting`, icon: "alert" }
+        : { tone: "success", label: `${utilPct}% Nominal`, icon: "check" });
+
+  const meter = computeSegmentedMeter(utilPct, runTone, 24);
+
+  let insight = "";
+  if (!completed.length && liveMeta) {
+    insight = `First cycle of ${cleanProgName(group?.program || liveMeta.program)} is currently cutting in progress.`;
+  } else if (qualityCounts.over > 0) {
+    insight = `${qualityCounts.over} overrun cycle${qualityCounts.over === 1 ? "" : "s"} (>+30%) and ${fmtDurCompact(gapMs)} of inter-cycle gaps detected in this NC run.`;
+  } else if (qualityCounts.high > 0) {
+    insight = `${qualityCounts.normal} of ${completed.length} completed cycles ran nominal; ${qualityCounts.high} cycle${qualityCounts.high === 1 ? "" : "s"} drifted +15% slower.`;
+  } else if (incidents.length > 0) {
+    insight = `Cycle times stayed nominal across ${completed.length} jobs, with ${incidents.length} controller event${incidents.length === 1 ? "" : "s"} recorded.`;
+  } else {
+    insight = `Clean NC batch — ${completed.length} completed cycle${completed.length === 1 ? "" : "s"} at ${utilPct}% cutting utilization.`;
+  }
+
+  return {
+    programRaw: group?.program || liveMeta?.program || "Program",
+    programName: cleanProgName(group?.program || liveMeta?.program),
+    t0,
+    t1,
+    wallMs,
+    cutMs,
+    gapMs,
+    utilPct,
+    totalJobs: sortedParts.length + (liveMeta ? 1 : 0),
+    completedCount: completed.length,
+    partialCount: qualityCounts.partial,
+    baselineMs,
+    medianMs,
+    p10Ms,
+    p90Ms,
+    minMs,
+    maxMs,
+    avgMs,
+    qualityCounts,
+    healthBadge,
+    meter,
+    miniStrip,
+    jobRows,
+    sortedParts,
+    incidents,
+    insight,
+  };
+}
+
+/**
+ * Compute Single Job diagnostic report: 24-segment pace meter, range bar needle,
+ * 5-axis grounded radar vs NC baseline, pre-cycle gap, batch rank, and insight.
+ */
+export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = null, events = [], overview = null }) {
+  const isLive = !part && !!liveMeta;
+  if (!part && !liveMeta) return null;
+
+  const t0 = isLive ? liveMeta.t0 : part.t0;
+  const t1 = isLive ? liveMeta.t1 : part.t1;
+  const durMs = isLive ? liveMeta.durMs : (part.dur || Math.max(0, t1 - t0));
+  const baselineMs = (part?.baseline ? part.baseline * 1000 : null)
+    || fullNc?.baselineMs
+    || (isLive ? liveMeta.totalEstMs : null);
+
+  const statusKind = isLive ? "live" : partDeviationKind(part);
+  const badge = healthBadgeForKind(statusKind);
+
+  const devRatio = (!isLive && part.dev != null && Number.isFinite(part.dev))
+    ? part.dev
+    : (baselineMs && durMs > 0 && !isLive ? durMs / baselineMs : null);
+  const devPct = devRatio != null ? Math.round((devRatio - 1) * 100) : null;
+
+  // Efficiency % for 24-segment meter
+  let efficiencyPct = 100;
+  if (isLive) {
+    efficiencyPct = liveMeta.totalEstMs && liveMeta.totalEstMs > 0
+      ? Math.max(2, Math.min(100, Math.round((durMs / liveMeta.totalEstMs) * 100)))
+      : 50;
+  } else if (baselineMs && durMs > 0) {
+    efficiencyPct = Math.max(15, Math.min(100, Math.round((baselineMs / durMs) * 100)));
+  } else {
+    efficiencyPct = 85;
+  }
+
+  const meterTone = isLive
+    ? "info"
+    : (statusKind === "over" ? "danger" : statusKind === "high" ? "warning" : statusKind === "low" ? "info" : "success");
+  const meter = computeSegmentedMeter(efficiencyPct, meterTone, 24);
+
+  // Duration Range Needle relative to NC batch min..max (or baseline band)
+  const refBase = baselineMs || durMs || 60e3;
+  const scaleMin = Math.min(fullNc?.minMs ?? refBase * 0.72, refBase * 0.72, durMs * 0.92);
+  const scaleMax = Math.max(fullNc?.maxMs ?? refBase * 1.4, refBase * 1.4, durMs * 1.05);
+  const scaleSpan = Math.max(1000, scaleMax - scaleMin);
+  const rangeNeedle = {
+    minMs: scaleMin,
+    maxMs: scaleMax,
+    baseMs: refBase,
+    valMs: durMs,
+    basePct: Math.max(4, Math.min(96, ((refBase - scaleMin) / scaleSpan) * 100)),
+    needlePct: Math.max(2, Math.min(98, ((durMs - scaleMin) / scaleSpan) * 100)),
+  };
+
+  // Position & rank inside NC run
+  const sortedParts = fullNc?.sortedParts || [];
+  const key = isLive ? "__LIVE__" : partKeyOf(part);
+  const chronoIdx = isLive
+    ? sortedParts.length + 1
+    : Math.max(1, sortedParts.findIndex((p) => partKeyOf(p) === key) + 1);
+  const totalInRun = Math.max(chronoIdx, fullNc?.totalJobs || sortedParts.length || 1);
+
+  const prevPart = !isLive && chronoIdx > 1
+    ? sortedParts[chronoIdx - 2]
+    : (isLive && sortedParts.length ? sortedParts[sortedParts.length - 1] : null);
+  const preGapMs = prevPart ? Math.max(0, t0 - prevPart.t1) : null;
+
+  const completed = sortedParts.filter((p) => !p.partial && p.dur > 0);
+  const byFastest = completed.slice().sort((a, b) => a.dur - b.dur);
+  const speedRank = !isLive ? (byFastest.findIndex((p) => partKeyOf(p) === key) + 1) : null;
+
+  const incidents = (Array.isArray(events) ? events : [])
+    .filter((e) => e && e.ts >= t0 - 5e3 && e.ts <= t1 + 5e3 && e.rule !== "program")
+    .sort((a, b) => a.ts - b.ts);
+
+  // 5-Axis Grounded Telemetry Radar (Job vs NC Baseline)
+  const clampScore = (v) => Math.max(12, Math.min(100, Math.round(v)));
+  const paceScore = isLive
+    ? clampScore(overview?.overrides?.feed ?? 92)
+    : clampScore(devRatio ? (1 / devRatio) * 95 : 88);
+
+  const medMs = fullNc?.medianMs || baselineMs || durMs || 1;
+  const stabErr = isLive ? 0.06 : Math.abs(durMs - medMs) / Math.max(1, medMs);
+  const stabilityScore = clampScore((1 - Math.min(0.85, stabErr * 1.45)) * 100);
+
+  const gapPenalty = preGapMs != null && baselineMs
+    ? Math.min(45, (preGapMs / Math.max(60e3, baselineMs)) * 45)
+    : 0;
+  const evPenalty = incidents.reduce((acc, e) => acc + (e.sev === "CRITICAL" ? 32 : 16), 0);
+  const continuityScore = clampScore(100 - evPenalty - gapPenalty);
+
+  const feedVal = liveMeta?.feedOvrd ?? overview?.overrides?.feed ?? 100;
+  const hasFeedEvent = incidents.some((e) => /feed|ovrd|hold/i.test(`${e.rule} ${e.msg}`));
+  const feedScore = clampScore(hasFeedEvent ? Math.min(feedVal, 74) : feedVal);
+
+  const consistencyScore = isLive
+    ? 86
+    : (speedRank && byFastest.length > 1
+      ? clampScore(100 - ((speedRank - 1) / (byFastest.length - 1)) * 45)
+      : (statusKind === "normal" ? 90 : statusKind === "high" ? 68 : statusKind === "over" ? 42 : 76));
+
+  const radar = [
+    { label: "Pace", job: paceScore, base: 92 },
+    { label: "Stability", job: stabilityScore, base: 88 },
+    { label: "Flow", job: continuityScore, base: 94 },
+    { label: "Feed", job: feedScore, base: 95 },
+    { label: "Repeat", job: consistencyScore, base: 86 },
+  ];
+
+  // Plain-English contextual insight
+  let insight = "";
+  if (isLive) {
+    const remTxt = liveMeta.remainingMs != null ? ` · ~${fmtDurCompact(liveMeta.remainingMs)} remaining` : "";
+    insight = `Active cycle cutting at ${liveMeta.spindleRpm != null ? `${liveMeta.spindleRpm} RPM` : "live speed"} (Feed ${feedVal}%)${remTxt}.`;
+  } else if (statusKind === "over") {
+    insight = `Ran ${devPct != null ? `+${devPct}%` : "significantly"} slower than NC baseline${incidents.length ? ` with ${incidents.length} controller event${incidents.length === 1 ? "" : "s"} overlapping` : ""}.`;
+  } else if (statusKind === "high") {
+    insight = `Drifted ${devPct != null ? `+${devPct}%` : "+15%"} above NC baseline — inspect feed override or chip-clear pause.`;
+  } else if (statusKind === "low") {
+    insight = `Finished ${devPct != null ? `${devPct}%` : "faster"} under NC baseline — verify no cycle abort or dry run.`;
+  } else if (incidents.length > 0) {
+    insight = `Finished within nominal band despite ${incidents.length} controller event${incidents.length === 1 ? "" : "s"} during cycle.`;
+  } else {
+    insight = `Clean nominal cycle${devPct != null ? ` (${devPct >= 0 ? "+" : ""}${devPct}% vs baseline)` : ""} with zero controller interruptions.`;
+  }
+
+  return {
+    isLive,
+    partKey: key,
+    jobLabel: isLive ? "Live Cycle" : `Job #${part.job ?? chronoIdx}`,
+    programRaw: isLive ? liveMeta.program : (part.program || fullNc?.programRaw || "Program"),
+    programName: cleanProgName(isLive ? liveMeta.program : (part.program || fullNc?.programRaw)),
+    t0,
+    t1,
+    durMs,
+    remainingMs: isLive ? liveMeta.remainingMs : null,
+    baselineMs,
+    devPct,
+    efficiencyPct,
+    statusKind,
+    badge,
+    meter,
+    rangeNeedle,
+    chronoIdx,
+    totalInRun,
+    speedRank: speedRank && speedRank > 0 ? speedRank : null,
+    completedInRun: byFastest.length,
+    preGapMs,
+    spindleRpm: isLive ? liveMeta.spindleRpm : (Number.isFinite(overview?.spindle_speed) ? Math.round(overview.spindle_speed) : null),
+    feedOvrd: feedVal,
+    toolId: liveMeta?.toolId || overview?.tool_id || null,
+    radar,
+    incidents,
+    insight,
+    prevPart: !isLive && chronoIdx > 1 ? sortedParts[chronoIdx - 2] : null,
+    nextPart: !isLive && chronoIdx < sortedParts.length ? sortedParts[chronoIdx] : null,
+  };
+}
+
