@@ -10,16 +10,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Rajdhani:wght@500;600;700&display=swap" />
-  <link rel="stylesheet" href="css/cards.css?v=81" />
+  <link rel="stylesheet" href="css/shadcn-theme.css?v=1" />
+  <link rel="stylesheet" href="css/cards.css?v=82" />
   <link rel="stylesheet" href="css/nc-folio.css?v=4" />
   <link rel="stylesheet" href="css/pw-frost.css?v=2" />
-  <link rel="stylesheet" href="css/parts-flap.css?v=2" />
-  <link rel="stylesheet" href="css/godmode.css?v=35" />
-  <link rel="stylesheet" href="css/kpi-bento.css?v=1" />
-  <link rel="stylesheet" href="css/analytics-bento.css?v=3" />
-  <link rel="stylesheet" href="css/fleet-bento.css?v=2" />
-  <link rel="stylesheet" href="css/timeline-bento.css?v=4" />
+  <link rel="stylesheet" href="css/parts-flap.css?v=3" />
+  <link rel="stylesheet" href="css/godmode.css?v=36" />
+  <link rel="stylesheet" href="css/kpi-bento.css?v=2" />
+  <link rel="stylesheet" href="css/analytics-bento.css?v=4" />
+  <link rel="stylesheet" href="css/fleet-bento.css?v=4" />
+  <link rel="stylesheet" href="css/timeline-bento.css?v=11" />
   <link rel="stylesheet" href="css/status-pills.css?v=2" />
+  <link rel="stylesheet" href="css/shadcn-shell.css?v=2" />
   <link rel="stylesheet" href="css/tv.css?v=12" />
 </head>
 <body>
@@ -30,15 +32,16 @@
       <h1 class="topbar-title">VMC SEQUENCE MONITOR</h1>
       <span class="topbar-sub"></span>
     </div>
+    <div class="topbar-nav-slot" id="topbarNavSlot"></div>
     <div class="topbar-right">
       <div class="summary-chips" id="summaryChips"></div>
       <div class="conn" id="conn">
         <span class="conn-dot" id="connDot"></span>
         <span class="conn-text" id="connText">connecting…</span>
       </div>
-      <button class="cfg-btn" id="themeBtn" title="Toggle card dark / light mode">☾</button>
-      <button class="tv-cfg-btn" id="fsBtn" title="Enter TV Fullscreen wall mode">⛶</button>
-      <button class="tv-cfg-btn" id="dashCfgBtn" title="Display and card settings">☰</button>
+      <button class="cfg-btn" id="themeBtn" title="Toggle dark / light mode" aria-label="Toggle dark or light theme">☾</button>
+      <button class="tv-cfg-btn" id="fsBtn" title="Enter TV Fullscreen wall mode" aria-label="Enter TV fullscreen wall mode">⛶</button>
+      <button class="tv-cfg-btn" id="dashCfgBtn" title="Display and card settings" aria-label="Open display and card settings">☰</button>
     </div>
   </header>
 
@@ -90,7 +93,7 @@
   <script src="js/nc-folio.js?v=4"></script>
   <script src="js/app.js?v=74"></script>
   <!-- God-mode modules: separate ES-module graph, never imported by app.js. -->
-  <script type="module" src="js/godmode.js?v=41"></script>
+  <script type="module" src="js/godmode.js?v=42"></script>
 
 </body>
 </html>

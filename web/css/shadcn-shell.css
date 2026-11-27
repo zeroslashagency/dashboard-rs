@@ -1,0 +1,679 @@
+/* ============================================================================
+ * VMC SEQUENCE MONITOR — Unified shadcn/ui Shell, Primitives & Responsive Fix
+ *
+ * Harmonizes all 5 tabs (Dashboard, KPI, Analytics, Timeline, Fleet Intelligence)
+ * and the shared top bar onto one single-elevation, zero-clutter shadcn grammar.
+ * Loaded immediately before tv.css so TV Wall Board fullscreen rules stay intact.
+ * ==========================================================================*/
+
+/* ==================== 1. BODY & CONTAINER CANVAS ==================== */
+html:not([data-tv]) {
+  background: var(--sh-canvas-grad);
+  background-color: var(--background);
+}
+
+body {
+  padding: 0 18px 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+main {
+  padding-top: 14px;
+}
+
+/* ==================== 2. UNIFIED 3-ZONE 56PX STICKY TOP BAR ==================== */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  min-height: 56px;
+  margin: 0 -18px 0;
+  padding: 0 20px;
+  background: var(--sh-nav-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--sh-shadow-sm);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.topbar-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.24rem;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  line-height: 1;
+  color: var(--foreground);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.topbar-sub:empty {
+  display: none;
+}
+
+/* Center Zone: Navigation tabs embedded cleanly inside Top Bar */
+.topbar-nav-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.topbar-nav-slot .godnav {
+  position: static;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.topbar-nav-slot .godnav-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  flex-wrap: nowrap;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbar-nav-slot .godnav-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.topbar-nav-slot .godnav-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 140ms var(--sh-ease), background-color 140ms var(--sh-ease), border-color 140ms var(--sh-ease), box-shadow 140ms var(--sh-ease);
+}
+
+.topbar-nav-slot .godnav-tab::after {
+  display: none;
+}
+
+.topbar-nav-slot .godnav-tab:hover:not(.is-active) {
+  color: var(--foreground);
+  background: var(--sh-hover);
+}
+
+.topbar-nav-slot .godnav-tab.is-active {
+  color: var(--foreground);
+  font-weight: 600;
+  background: var(--card);
+  border-color: var(--border-strong);
+  box-shadow: var(--sh-shadow-sm);
+}
+
+/* Right Zone: Uniform shadcn outline icon controls */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.topbar .cfg-btn,
+.topbar .tv-cfg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 140ms var(--sh-ease), border-color 140ms var(--sh-ease), color 140ms var(--sh-ease);
+}
+
+.topbar .cfg-btn:hover,
+.topbar .tv-cfg-btn:hover {
+  background: var(--accent-surface);
+  border-color: var(--border-strong);
+}
+
+/* ==================== 3. HARMONIZED VIEW HEADERS (ZERO-PILL METADATA) ==================== */
+.ds-section {
+  padding: 2px 0 22px;
+}
+
+.ds-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--sh-hairline);
+}
+
+.ds-head-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ds-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.48rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--foreground);
+}
+
+/* Natural title/sentence metadata — no all-caps shouting */
+.ds-sub {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted-foreground);
+}
+
+.ds-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Quiet unboxed gapless status readout (eliminates bulky glossy pill in section header) */
+.ds-head .ds-conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: none;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--muted-foreground);
+}
+
+.ds-head .ds-conf.conf-ok {
+  color: var(--sh-emerald);
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.07);
+}
+.ds-head .ds-conf.conf-warn {
+  color: var(--sh-amber);
+  border-color: rgba(245, 158, 11, 0.30);
+  background: rgba(245, 158, 11, 0.08);
+}
+.ds-head .ds-conf.conf-bad {
+  color: var(--sh-crimson);
+  border-color: rgba(244, 63, 94, 0.30);
+  background: rgba(244, 63, 94, 0.08);
+}
+
+/* Unified shadcn segmented window selector (Shift / 24h / 7d) */
+.ds-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.ds-window-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms var(--sh-ease), color 140ms var(--sh-ease), border-color 140ms var(--sh-ease);
+}
+
+.ds-window-btn:hover:not(.is-active) {
+  color: var(--foreground);
+  background: var(--sh-hover);
+}
+
+.ds-window-btn.is-active {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  border-color: var(--border-strong);
+  box-shadow: var(--sh-shadow-sm);
+}
+
+/* ==================== 4. DASHBOARD MACHINE CARDS & SETTINGS DRAWER ==================== */
+/* Keep signature live color-coded machine framing; tighten oversized radius & heavy drop shadows */
+html:not([data-tv]) .machine-card {
+  border-radius: 22px;
+}
+
+html:not([data-tv]) .machine-card-shell {
+  border-radius: 20px;
+  padding: 5px;
+  box-shadow: var(--sh-shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 160ms var(--sh-ease), box-shadow 160ms var(--sh-ease);
+}
+
+html:not([data-tv]) .machine-card:hover .machine-card-shell {
+  transform: translateY(-2px);
+  box-shadow: var(--sh-shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+}
+
+html:not([data-tv]) .card-panel {
+  border-radius: 15px;
+}
+
+/* Harmonized shadcn Display Settings Popover & Parts Breakdown Modal */
+.dash-cfg-panel,
+.dash-cfg-pop,
+.parts-pop {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-shadow-lg);
+}
+
+.dash-cfg-title,
+.parts-pop-title {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.dash-cfg-sec-t {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--muted-foreground);
+}
+
+.dash-cfg-row select,
+.tl2-select,
+.tl2-input,
+.tl2-textarea,
+.fi-input,
+.fi-select,
+.fi-textarea {
+  background: var(--sh-input-bg);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  transition: border-color 140ms var(--sh-ease), box-shadow 140ms var(--sh-ease);
+}
+
+.dash-cfg-row select:focus,
+.tl2-select:focus,
+.tl2-input:focus,
+.tl2-textarea:focus,
+.fi-input:focus,
+.fi-select:focus,
+.fi-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.dash-cfg-btn,
+.tl2-btn,
+.kb-clear-btn {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-weight: 500;
+  transition: background-color 140ms var(--sh-ease), border-color 140ms var(--sh-ease);
+}
+
+.dash-cfg-btn:hover,
+.tl2-btn:hover,
+.kb-clear-btn:hover {
+  background: var(--accent-surface);
+  border-color: var(--border-strong);
+}
+
+.dash-cfg-save {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
+}
+.dash-cfg-save:hover {
+  background: var(--primary);
+  opacity: 0.92;
+}
+
+.dash-cfg-x,
+.parts-pop-x,
+.alert-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  color: var(--muted-foreground);
+  transition: background-color 140ms var(--sh-ease), color 140ms var(--sh-ease);
+}
+.dash-cfg-x:hover,
+.parts-pop-x:hover,
+.alert-panel-close:hover {
+  background: var(--sh-hover);
+  color: var(--foreground);
+}
+
+/* ==================== 5. SINGLE-ELEVATION CARDS ACROSS ALL 5 TABS ==================== */
+.kb-card,
+.an-card,
+.fi-card,
+.fi-trust-bar,
+.tl2-kpi,
+.tl2-board,
+.ds-row,
+.ds-fleet-kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-shadow-sm);
+}
+
+[data-theme="light"] .kb-card,
+[data-theme="light"] .an-card,
+[data-theme="light"] .fi-card,
+[data-theme="light"] .fi-trust-bar,
+[data-theme="light"] .tl2-kpi,
+[data-theme="light"] .tl2-board {
+  box-shadow: var(--sh-shadow-md);
+}
+
+/* Consistent Timeline & Fleet Toolbar Control Heights (32px) */
+.tl2-seg {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+.tl2-seg-btn {
+  height: 26px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tl2-seg-btn.is-active {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: var(--sh-shadow-sm);
+}
+
+.tl2-btn,
+.tl2-filter-select {
+  height: var(--control-h-sm);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.tl2-btn.is-live {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
+}
+.tl2-btn.is-live:hover {
+  background: var(--primary);
+  opacity: 0.92;
+  border-color: transparent;
+}
+
+.tl2-drawer {
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-shadow-lg);
+}
+
+/* Fleet Intelligence sub-tabs & buttons harmonized */
+.fi-subtabs,
+.fi-subnav {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+.fi-subtab-btn,
+.fi-sub-btn {
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.fi-subtab-btn.is-active,
+.fi-sub-btn.is-active {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  border-color: var(--border-strong);
+  box-shadow: var(--sh-shadow-sm);
+}
+.fi-btn {
+  height: var(--control-h-sm);
+  padding: 0 13px;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+/* ==================== 6. ALERT BELL, PANEL & TOASTS ==================== */
+.alert-bell {
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  color: var(--foreground);
+  box-shadow: var(--sh-shadow-md);
+}
+
+.alert-panel {
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-shadow-lg);
+  color: var(--popover-foreground);
+}
+
+.alert-filters button {
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-weight: 500;
+  transition: background-color 140ms var(--sh-ease), color 140ms var(--sh-ease);
+}
+.alert-filters button.is-active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
+}
+
+/* ==================== 7. UNIVERSAL KEYBOARD FOCUS RINGS ==================== */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Footer restraint */
+.footbar {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sh-hairline);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+
+/* ==================== 8. RESPONSIVE TABLET & NARROW-SCREEN POLISH ==================== */
+@media (max-width: 1120px) {
+  .topbar {
+    gap: 12px;
+    padding: 0 14px;
+  }
+  .topbar-title {
+    font-size: 1.12rem;
+  }
+  .topbar-nav-slot .godnav-tab {
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+}
+
+@media (max-width: 920px) {
+  body {
+    padding: 0 12px 18px;
+  }
+  .topbar {
+    margin: 0 -12px 0;
+    padding: 8px 12px;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "brand actions"
+      "nav nav";
+    gap: 8px 12px;
+  }
+  .topbar-left { grid-area: brand; }
+  .topbar-right { grid-area: actions; }
+  .topbar-nav-slot {
+    grid-area: nav;
+    justify-content: flex-start;
+  }
+  .topbar-nav-slot .godnav {
+    justify-content: flex-start;
+  }
+  .topbar-nav-slot .godnav-inner {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .tl2-toolbar {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .tl2-tb-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 640px) {
+  .ds-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .ds-head-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* Timeline Detail Popup gracefully docks as a full-width bottom sheet on mobile */
+  .tl2-drawer {
+    left: 8px !important;
+    right: 8px !important;
+    top: auto !important;
+    bottom: 8px !important;
+    width: auto !important;
+    max-height: 78vh;
+  }
+  .tl2-pop-split {
+    grid-template-columns: 1fr;
+  }
+  .tl2-pop-form-row {
+    grid-template-columns: 1fr;
+  }
+  .tl2-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fi-subnav {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+}
+
+/* ==================== 9. TV MODE ISOLATION SAFETY ==================== */
+html[data-tv] .topbar {
+  position: relative;
+  grid-template-columns: auto 1fr;
+  margin: 0 0 6px;
+  min-height: 0;
+  background: transparent;
+  border-bottom: none;
+  box-shadow: none;
+}
+html[data-tv] .topbar-nav-slot {
+  display: none !important;
+}

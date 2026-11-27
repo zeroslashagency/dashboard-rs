@@ -6,73 +6,46 @@
  * ==========================================================================*/
 
 :root {
-  /* Dark Mode (Obsidian Precision Counterpart) */
-  --fi-card-bg: #0f121a;
-  --fi-card-bg-2: #151924;
-  --fi-card-border: rgba(255, 255, 255, 0.08);
-  --fi-card-border-strong: rgba(255, 255, 255, 0.15);
-  --fi-card-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
-  --fi-hairline: rgba(255, 255, 255, 0.07);
-  --fi-track: rgba(255, 255, 255, 0.08);
-  --fi-hover: rgba(255, 255, 255, 0.045);
+  --fi-card-bg: var(--card);
+  --fi-card-bg-2: var(--sh-surface-2);
+  --fi-card-border: var(--border);
+  --fi-card-border-strong: var(--border-strong);
+  --fi-card-shadow: var(--sh-shadow-sm);
+  --fi-hairline: var(--sh-hairline);
+  --fi-track: var(--sh-track);
+  --fi-hover: var(--sh-hover);
 
   /* Soft-to-vivid chart fills */
   --fi-bar-soft-top: rgba(167, 139, 250, 0.30);
   --fi-bar-soft-bot: rgba(139, 92, 246, 0.12);
   --fi-spark-soft: rgba(34, 197, 94, 0.28);
-  --fi-spark-vivid: #22c55e;
+  --fi-spark-vivid: var(--sh-emerald);
 
   /* Semantic palette */
-  --fi-cobalt: #3b82f6;
-  --fi-indigo: #7c3aed;
-  --fi-emerald: #22c55e;
-  --fi-amber: #f59e0b;
-  --fi-coral: #f43f5e;
-  --fi-muted-ink: #94a3b8;
+  --fi-cobalt: var(--sh-cobalt);
+  --fi-indigo: var(--sh-indigo);
+  --fi-emerald: var(--sh-emerald);
+  --fi-amber: var(--sh-amber);
+  --fi-coral: var(--sh-crimson);
+  --fi-muted-ink: var(--muted-foreground);
 
-  /* Always-high-contrast dark callout & chip (matches both references) */
-  --fi-callout-bg: #0a0d14;
-  --fi-callout-border: rgba(255, 255, 255, 0.16);
-  --fi-callout-fg: #ffffff;
-  --fi-callout-sub: rgba(226, 232, 240, 0.72);
+  /* Always-high-contrast dark callout & chip */
+  --fi-callout-bg: var(--sh-callout-bg);
+  --fi-callout-border: var(--sh-callout-border);
+  --fi-callout-fg: var(--sh-callout-fg);
+  --fi-callout-sub: var(--sh-callout-sub);
 
   /* Drawer */
-  --fi-drawer-bg: #0d1018;
-  --fi-backdrop: rgba(4, 6, 12, 0.72);
-  --fi-input-bg: #151a26;
+  --fi-drawer-bg: var(--popover);
+  --fi-backdrop: var(--sh-backdrop);
+  --fi-input-bg: var(--sh-input-bg);
 }
 
 [data-theme="light"] {
-  /* Light Mode (Reference-Faithful Elevated Crisp White Bento) */
-  --fi-card-bg: #ffffff;
-  --fi-card-bg-2: #f6f7fb;
-  --fi-card-border: rgba(15, 23, 42, 0.075);
-  --fi-card-border-strong: rgba(15, 23, 42, 0.15);
-  --fi-card-shadow: 0 6px 24px rgba(15, 23, 42, 0.055), 0 1px 3px rgba(15, 23, 42, 0.04);
-  --fi-hairline: rgba(15, 23, 42, 0.07);
-  --fi-track: #e8ecf4;
-  --fi-hover: rgba(15, 23, 42, 0.035);
-
+  --fi-card-shadow: var(--sh-shadow-md);
   --fi-bar-soft-top: #e9d5ff;
   --fi-bar-soft-bot: #f3e8ff;
   --fi-spark-soft: #bbf7d0;
-  --fi-spark-vivid: #22c55e;
-
-  --fi-cobalt: #2563eb;
-  --fi-indigo: #6d28d9;
-  --fi-emerald: #16a34a;
-  --fi-amber: #d97706;
-  --fi-coral: #dc2626;
-  --fi-muted-ink: #64748b;
-
-  --fi-callout-bg: #0b0e15;
-  --fi-callout-border: rgba(15, 23, 42, 0.18);
-  --fi-callout-fg: #ffffff;
-  --fi-callout-sub: rgba(203, 213, 225, 0.78);
-
-  --fi-drawer-bg: #ffffff;
-  --fi-backdrop: rgba(15, 23, 42, 0.36);
-  --fi-input-bg: #f8fafc;
 }
 
 /* ==================== ROOT & SEMANTIC HELPERS ==================== */
@@ -235,6 +208,10 @@
   background: rgba(37, 99, 235, 0.1);
   border: 1px solid rgba(37, 99, 235, 0.28);
   font-size: 13px;
+}
+.fi-filter-bar[hidden],
+.fi-filter-bar:empty {
+  display: none;
 }
 
 /* ==================== CORE BENTO CARD & GRIDS ==================== */

@@ -1,0 +1,165 @@
+/* ============================================================================
+ * VMC SEQUENCE MONITOR — Canonical shadcn/ui Semantic Token Foundation
+ *
+ * Single source of truth for Light & Dark surfaces, borders, contrast, radius,
+ * elevation, control sizing, and semantic telemetry hues across all 5 tabs:
+ *   Dashboard · KPI · Analytics · Timeline · Fleet Intelligence
+ * ==========================================================================*/
+
+:root,
+[data-theme="dark"] {
+  /* Core shadcn/ui Semantic Tokens — Precision Neutral Obsidian (Dark) */
+  --background: #090b10;
+  --foreground: #f1f5f9;
+
+  --card: #0f1219;
+  --card-foreground: #f1f5f9;
+
+  --popover: #121620;
+  --popover-foreground: #f1f5f9;
+
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+
+  --secondary: #161b26;
+  --secondary-foreground: #e2e8f0;
+
+  --muted-surface: #181d28;
+  --muted-foreground: #94a3b8;
+  --muted: var(--muted-foreground);
+
+  --accent-surface: #1d2433;
+  --accent-foreground: #f8fafc;
+
+  --destructive: #f43f5e;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: rgba(59, 130, 246, 0.48);
+
+  /* Structural Surface Helpers */
+  --sh-canvas-grad: radial-gradient(ellipse at 50% 0%, #0e131d 0%, #090b10 58%, #07090d 100%);
+  --sh-nav-bg: rgba(9, 11, 16, 0.94);
+  --sh-surface-2: #141923;
+  --sh-well: rgba(255, 255, 255, 0.032);
+  --sh-well-hover: rgba(255, 255, 255, 0.065);
+  --sh-hairline: rgba(255, 255, 255, 0.07);
+  --sh-track: rgba(255, 255, 255, 0.075);
+  --sh-hover: rgba(255, 255, 255, 0.045);
+  --sh-input-bg: #121722;
+  --sh-backdrop: rgba(4, 6, 12, 0.68);
+
+  /* High-Contrast Floating Callout */
+  --sh-callout-bg: #0b0e15;
+  --sh-callout-border: rgba(255, 255, 255, 0.15);
+  --sh-callout-fg: #f8fafc;
+  --sh-callout-sub: rgba(203, 213, 225, 0.76);
+
+  /* Single-Elevation Shadow Scale (Dark stays crisp & flat) */
+  --sh-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.36);
+  --sh-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.36);
+  --sh-shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.48);
+
+  /* Semantic Telemetry Palette (Strictly Data State) */
+  --sh-emerald: #22c55e;
+  --sh-cobalt: #3b82f6;
+  --sh-indigo: #8b5cf6;
+  --sh-amber: #f59e0b;
+  --sh-crimson: #f43f5e;
+  --sh-slate: #64748b;
+
+  /* Unified Radius & Control Scale (r_inner = r_outer - padding) */
+  --radius-xs: 5px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --control-h-sm: 32px;
+  --control-h-md: 36px;
+  --sh-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Typography */
+  --font-display: "Rajdhani", "IBM Plex Sans", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+}
+
+[data-theme="light"] {
+  /* Core shadcn/ui Semantic Tokens — Crisp Daylight Studio (Light) */
+  --background: #f1f4f8;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+
+  --muted-surface: #eef2f7;
+  --muted-foreground: #475569;
+  --muted: var(--muted-foreground);
+
+  --accent-surface: #e8eef6;
+  --accent-foreground: #0f172a;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(15, 23, 42, 0.095);
+  --border-strong: rgba(15, 23, 42, 0.17);
+  --input: rgba(15, 23, 42, 0.16);
+  --ring: rgba(37, 99, 235, 0.38);
+
+  /* Structural Surface Helpers */
+  --sh-canvas-grad: linear-gradient(180deg, #f4f6fa 0%, #eef2f6 100%);
+  --sh-nav-bg: rgba(255, 255, 255, 0.94);
+  --sh-surface-2: #f8fafc;
+  --sh-well: #f8fafc;
+  --sh-well-hover: #f1f5f9;
+  --sh-hairline: rgba(15, 23, 42, 0.075);
+  --sh-track: #e6ebf2;
+  --sh-hover: rgba(15, 23, 42, 0.04);
+  --sh-input-bg: #ffffff;
+  --sh-backdrop: rgba(15, 23, 42, 0.34);
+
+  /* High-Contrast Floating Callout (stays obsidian for visual pop) */
+  --sh-callout-bg: #0f172a;
+  --sh-callout-border: rgba(15, 23, 42, 0.20);
+  --sh-callout-fg: #ffffff;
+  --sh-callout-sub: rgba(203, 213, 225, 0.80);
+
+  /* Single-Elevation Shadow Scale (Soft tactile lift in Light mode) */
+  --sh-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --sh-shadow-md: 0 2px 10px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --sh-shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.06);
+
+  /* Semantic Telemetry Palette (High-contrast Daylight) */
+  --sh-emerald: #16a34a;
+  --sh-cobalt: #2563eb;
+  --sh-indigo: #6d28d9;
+  --sh-amber: #d97706;
+  --sh-crimson: #dc2626;
+  --sh-slate: #64748b;
+}
+
+/* Base typography & tabular defaults */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+
+h1, h2, h3 {
+  text-wrap: balance;
+}

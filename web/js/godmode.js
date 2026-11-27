@@ -25,10 +25,10 @@ const REFRESH_MS = 15000;
  * module; `window:true` shows the Shift/24h/7d selector for that view. */
 const TABS = [
   { id: "dashboard", label: "Dashboard", grid: true },
-  { id: "kpi", label: "KPI", builder: mountKpi, window: true, title: "KPI Overview", sub: "fleet OEE · stacked throughput · time mix · program drift" },
-  { id: "analytics", label: "Analytics", builder: mountAnalytical, window: true, title: "Root-Cause Analytics", sub: "synchronized fleet timeline · downtime Pareto · override discipline · fault diagnostics" },
+  { id: "kpi", label: "KPI", builder: mountKpi, window: true, title: "KPI Overview", sub: "Fleet OEE · Stacked throughput · Time mix · Program drift" },
+  { id: "analytics", label: "Analytics", builder: mountAnalytical, window: true, title: "Root-Cause Analytics", sub: "Synchronized fleet stream · Downtime Pareto · Override discipline · Fault diagnostics" },
   { id: "timeline", label: "Timeline", builder: mountTimeline, window: false, title: "Production Timeline", sub: "" },
-  { id: "fleet", label: "Fleet Intelligence", builder: mountFleetIntelligence, window: true, title: "Fleet Intelligence", sub: "production targets · program-split cycles · downtime causes · reliability & predictive maintenance" },
+  { id: "fleet", label: "Fleet Intelligence", builder: mountFleetIntelligence, window: true, title: "Fleet Intelligence", sub: "Production targets · Program-split cycles · Downtime causes · Predictive reliability" },
 ];
 
 const LEGACY_TAB_MAP = { maintenance: "fleet", statistics: "fleet" };
@@ -47,11 +47,17 @@ function start() {
   document.getElementById("ds-analytical")?.remove();
   document.getElementById("plan")?.remove();
 
-  // nav bar
+  // nav bar — mount directly inside the unified 3-zone topbar when present
   const nav = document.createElement("nav");
   nav.className = "godnav";
-  nav.innerHTML = `<div class="godnav-inner" data-f="inner"></div>`;
-  main.parentNode.insertBefore(nav, main);
+  nav.setAttribute("aria-label", "Primary sections");
+  nav.innerHTML = `<div class="godnav-inner" role="tablist" data-f="inner"></div>`;
+  const navSlot = document.getElementById("topbarNavSlot");
+  if (navSlot) {
+    navSlot.replaceChildren(nav);
+  } else {
+    main.parentNode.insertBefore(nav, main);
+  }
   const inner = nav.querySelector('[data-f="inner"]');
 
   // shared view host (everything except the dashboard grid renders here)
@@ -63,6 +69,8 @@ function start() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "godnav-tab";
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", "false");
     btn.dataset.tab = tab.id;
     btn.textContent = tab.label;
     btn.addEventListener("click", () => activate(tab.id));
@@ -111,7 +119,11 @@ function activate(id) {
   // heavy canvas views (Timeline) instead of stacking canvas work.
   window.dispatchEvent(new CustomEvent("vmc-tab", { detail: { id } }));
 
-  document.querySelectorAll(".godnav-tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === id));
+  document.querySelectorAll(".godnav-tab").forEach((b) => {
+    const active = b.dataset.tab === id;
+    b.classList.toggle("is-active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
 
   // toggle dashboard grid vs view host
   const grid = document.getElementById("machineGrid");

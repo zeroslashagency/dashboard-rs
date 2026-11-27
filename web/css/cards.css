@@ -7,101 +7,80 @@
  * ==========================================================================*/
 
 :root {
-  /* layered near-black surface ladder */
-  --bg:       #000000;   /* page (dot-matrix sits here) */
-  --panel:    #0c0d10;   /* god-mode panels */
-  --card:     #121316;   /* god-mode card surfaces */
-  --elevated: #17181c;   /* boxes inside god-mode panels */
+  /* layered surface ladder — aliased to canonical shadcn-theme.css */
+  --bg:       var(--background);
+  --panel:    var(--card);
+  --elevated: var(--sh-surface-2);
 
   /* text ramp */
-  --text:  #f4f5f7;      /* primary */
-  --muted: #8b8f98;      /* secondary labels */
-  --faint: #5a5e66;      /* tertiary / notes */
+  --text:  var(--foreground);
+  --faint: #64748b;
 
-  /* one accent + hairlines */
-  --accent: #5ec8ff;     /* focus, active tab, links */
-  --border:        rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  /* accent + status */
+  --accent: var(--primary);
+  --green:  var(--sh-emerald);
+  --yellow: var(--sh-amber);
+  --red:    var(--sh-crimson);
 
-  /* status */
-  --green:  #34d399;
-  --yellow: #fbbf24;
-  --red:    #f87171;
-
-  /* radius scale (one source of truth) */
-  --radius:    14px;
-  --radius-sm:  8px;
-  --radius-lg: 20px;
+  /* radius scale */
+  --radius:    var(--radius-lg);
+  --radius-sm: 6px;
+  --radius-lg: 14px;
 
   /* depth */
-  --shadow:    0 8px 30px rgba(0, 0, 0, 0.45);
+  --shadow:    var(--sh-shadow-lg);
   --card-glow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
-  /* page wash + dot-matrix tint (theme-aware; light re-points below) */
-  --bg-grad: radial-gradient(ellipse at center, #0a0a0a 0%, #060606 55%, #000000 100%);
-  --dot-rgb: 255, 255, 255;   /* white dots on the black board */
+  /* page wash + dot-matrix tint */
+  --bg-grad: var(--sh-canvas-grad);
+  --dot-rgb: 255, 255, 255;
 
-  /* god-mode semantic surfaces (theme-aware; light re-points below) */
-  --gm-nav-bg:   rgba(0, 0, 0, 0.97);   /* sticky nav backdrop */
-  --gm-track:    rgba(0, 0, 0, 0.3);    /* bar/progress track wells */
-  --gm-well:     rgba(0, 0, 0, 0.22);   /* inset panel/well surfaces */
-  --gm-fill-soft: rgba(255, 255, 255, 0.06); /* unfilled soft bars */
-  --gm-hover:    rgba(255, 255, 255, 0.04);  /* row hover */
-  --gm-zebra:    rgba(255, 255, 255, 0.02);  /* odd-row stripe */
-  --gm-tip-bg:   rgba(15, 23, 42, 0.97);     /* tooltip body */
-  --gm-tip-border: rgba(148, 163, 184, 0.22);
-  --gm-on-accent: #ffffff;              /* text on a colored fill */
-  --gm-code-bg:  rgba(255, 255, 255, 0.08);  /* inline <code> chips */
-  --gm-hairline: rgba(148, 163, 184, 0.12);  /* faint internal rules */
-  --ds-tile:     #0f0f0f;               /* data-science section tiles (rows + fleet KPIs) */
-  --ds-tile-shadow: none;               /* dark: flat, no lift needed */
-  --ds-well:     rgba(255,255,255,0.05); /* inner kpi cells on a ds tile */
-
-  /* type */
-  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --font-display: "Rajdhani", "IBM Plex Sans", sans-serif;
+  /* god-mode semantic surfaces */
+  --gm-nav-bg:   var(--sh-nav-bg);
+  --gm-track:    var(--sh-track);
+  --gm-well:     var(--sh-well);
+  --gm-fill-soft: var(--sh-track);
+  --gm-hover:    var(--sh-hover);
+  --gm-zebra:    rgba(255, 255, 255, 0.02);
+  --gm-tip-bg:   var(--sh-callout-bg);
+  --gm-tip-border: var(--sh-callout-border);
+  --gm-on-accent: var(--primary-foreground);
+  --gm-code-bg:  rgba(255, 255, 255, 0.08);
+  --gm-hairline: var(--sh-hairline);
+  --ds-tile:     var(--card);
+  --ds-tile-shadow: var(--sh-shadow-sm);
+  --ds-well:     var(--sh-well);
 }
 
-/* ============================================================================
- * LIGHT MODE — full page. Re-points the surface ladder, text ramp, borders,
- * page wash and dot tint. Dark stays the default (:root above). Status hues
- * (--green/--yellow/--red) and --accent are intentionally unchanged so the
- * meaning of color is identical in both modes.
- * ==========================================================================*/
 [data-theme="light"] {
-  --bg:       #eef0f3;
-  --panel:    #ffffff;
-  --card:     #f7f8fa;
-  --elevated: #eef0f3;
+  --bg:       var(--background);
+  --panel:    var(--card);
+  --elevated: var(--sh-surface-2);
 
-  --text:  #0f1115;
-  --muted: #565b66;
-  --faint: #8b909a;
+  --text:  var(--foreground);
+  --faint: #64748b;
 
-  --border:        rgba(15, 17, 21, 0.10);
-  --border-strong: rgba(15, 17, 21, 0.18);
+  --shadow:    var(--sh-shadow-lg);
+  --card-glow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 
-  --shadow:    0 8px 30px rgba(15, 17, 21, 0.12);
-  --card-glow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-
-  --bg-grad: radial-gradient(ellipse at center, #f6f7f9 0%, #eceef2 55%, #e4e7ec 100%);
-  --dot-rgb: 24, 28, 36;     /* dark slate dots on the light wash */
+  --bg-grad: var(--sh-canvas-grad);
+  --dot-rgb: 15, 23, 42;
 
   /* god-mode semantic surfaces — light */
-  --gm-nav-bg:   rgba(255, 255, 255, 0.97);
-  --gm-track:    rgba(15, 17, 21, 0.06);
-  --gm-well:     rgba(15, 17, 21, 0.04);
-  --gm-fill-soft: rgba(15, 17, 21, 0.06);
-  --gm-hover:    rgba(15, 17, 21, 0.04);
-  --gm-zebra:    rgba(15, 17, 21, 0.02);
-  --gm-tip-bg:   rgba(255, 255, 255, 0.98);
-  --gm-tip-border: rgba(15, 17, 21, 0.14);
-  --gm-on-accent: #ffffff;
-  --gm-code-bg:  rgba(15, 17, 21, 0.07);
-  --gm-hairline: rgba(15, 17, 21, 0.10);
-  --ds-tile:     #ffffff;               /* light: tiles pop white off the grey page */
-  --ds-tile-shadow: 0 1px 3px rgba(15,17,21,0.06), 0 4px 14px rgba(15,17,21,0.05);
-  --ds-well:     #eef0f3;               /* light: grey inset on white tile */
+  --gm-nav-bg:   var(--sh-nav-bg);
+  --gm-track:    var(--sh-track);
+  --gm-well:     var(--sh-well);
+  --gm-fill-soft: var(--sh-track);
+  --gm-hover:    var(--sh-hover);
+  --gm-zebra:    rgba(15, 23, 42, 0.025);
+  --gm-tip-bg:   var(--sh-callout-bg);
+  --gm-tip-border: var(--sh-callout-border);
+  --gm-on-accent: var(--primary-foreground);
+  --gm-code-bg:  rgba(15, 23, 42, 0.07);
+  --gm-hairline: var(--sh-hairline);
+  --ds-tile:     var(--card);
+  --ds-tile-shadow: var(--sh-shadow-md);
+  --ds-well:     var(--secondary);
 }
 
 * { box-sizing: border-box; }

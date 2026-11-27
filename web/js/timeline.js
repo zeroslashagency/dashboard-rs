@@ -19,10 +19,13 @@ import {
   IST_OFFSET_MS,
   NORMAL_DEV,
   WIDE_DEV,
+  buildShiftSummaryReport,
   computeCurrentIstShift,
   computeIstDayBoundaries,
   computeShiftBoundaries,
   computeMinimapBins,
+  enumerateWindowDays,
+  enumerateWindowShifts,
   extractLaneGaps,
   fmtClockIST,
   fmtClockSecIST,
@@ -219,6 +222,14 @@ export function mountTimeline(body, dataLayer) {
         </div>
 
         <div class="tl2-stage" data-f="stage">
+          <div class="tl2-shift-row" data-f="shiftRow">
+            <div class="tl2-shift-gutter">
+              <span>Shifts</span>
+              <span class="tl2-shift-hint" data-f="shiftHint">IST</span>
+            </div>
+            <div class="tl2-shift-track" data-f="shiftTrack" role="group" aria-label="Shift utilization summary"></div>
+          </div>
+
           <div class="tl2-ruler-row">
             <div class="tl2-ruler-gutter">
               <span>Machine</span>
@@ -271,6 +282,8 @@ export function mountTimeline(body, dataLayer) {
   body.querySelectorAll("[data-f]").forEach((el) => {
     refs[el.dataset.f] = el;
   });
+  // Portal popup backdrop to document.body so it escapes <main>'s z-index:1 stacking context above global corner FABs.
+  if (refs.drawerBackdrop) document.body.appendChild(refs.drawerBackdrop);
 
   const ctx = {
     presetKey: initPreset.key,
@@ -306,6 +319,8 @@ export function mountTimeline(body, dataLayer) {
     liveTimer: null,
     destroyed: false,
     drawerItem: null,
+    shiftSegments: [],
+    lastShiftSig: "",
   };
 
   const inflight = new Set();
@@ -637,11 +652,11 @@ export function mountTimeline(body, dataLayer) {
   function computeLaneHeight() {
     const n = Math.max(1, ctx.lanes.size || 8);
     const vh = window.innerHeight || 900;
-    // Budget for 8 lanes + KPI strip + toolbar + legend + ruler + minimap on desktop
-    const reserved = 305;
-    const avail = Math.max(54 * n, vh - reserved);
+    // Budget for 8 lanes + KPI strip + toolbar + legend + shift bar + ruler + minimap on desktop
+    const reserved = 342;
+    const avail = Math.max(52 * n, vh - reserved);
     const ideal = Math.floor(avail / n);
-    return Math.max(54, Math.min(72, ideal));
+    return Math.max(52, Math.min(70, ideal));
   }
 
   function ensureLane(id, name) {
@@ -1918,8 +1933,174 @@ export function mountTimeline(body, dataLayer) {
     refs.kpiIncSub.textContent = `${fleet.loggedInWindow} gap cause${fleet.loggedInWindow === 1 ? "" : "s"} logged in window`;
   }
 
+  function renderShiftBand(from, to, span) {
+    const track = refs.shiftTrack;
+    if (!track) return;
+    const nowMs = Date.now();
+    const useDaily = span > 84 * 3600e3;
+    if (refs.shiftHint) refs.shiftHint.textContent = useDaily ? "Daily" : "IST";
+
+    const items = useDaily
+      ? enumerateWindowDays(from, to, nowMs)
+      : enumerateWindowShifts(from, to, nowMs);
+
+    const activeShiftId = ctx.drawerItem?.hit?.type === "shift" ? ctx.drawerItem.hit.data?.id : "";
+    const trackW = ctx.trackW || track.clientWidth || 900;
+
+    const segments = [];
+    const sigParts = [useDaily ? "D" : "S", Math.round(trackW), activeShiftId];
+    for (const shift of items) {
+      const report = buildShiftSummaryReport({
+        shift,
+        lanes: ctx.lanes,
+        overviewMap: ctx.over,
+        eventsMap: ctx.events,
+        downtimeLogs: ctx.downtimeLogs,
+        nowMs,
+      });
+      segments.push({ shift, report });
+      sigParts.push(
+        `${shift.id}:${shift.leftPct.toFixed(2)}:${shift.widthPct.toFixed(2)}:${report?.utilPct ?? "n"}:${report?.totalParts ?? 0}:${shift.isLive ? 1 : 0}`,
+      );
+    }
+
+    ctx.shiftSegments = segments;
+    const nextSig = sigParts.join("|");
+    if (nextSig === ctx.lastShiftSig) return;
+    ctx.lastShiftSig = nextSig;
+
+    if (!segments.length) {
+      track.innerHTML = "";
+      return;
+    }
+
+    const html = segments
+      .map(({ shift, report }, idx) => {
+        const pxW = (shift.widthPct / 100) * trackW;
+        const utilPct = report?.utilPct;
+        const parts = report?.totalParts ?? 0;
+        const toneCls = shift.isFuture
+          ? "is-future"
+          : utilPct == null
+            ? "is-none"
+            : utilPct >= 75
+              ? "is-good"
+              : utilPct >= 50
+                ? "is-warn"
+                : "is-bad";
+        const isActive = activeShiftId && activeShiftId === shift.id;
+        const barW = utilPct != null ? Math.max(4, Math.min(100, utilPct)) : 0;
+        const utilStr = utilPct != null ? `${utilPct}%` : "—";
+
+        let inner = "";
+        if (pxW >= 216) {
+          inner = `
+            <span class="tl2-sh-seg-left">
+              <span class="tl2-sh-seg-name">${escHtml(shift.name)}</span>
+              <span class="tl2-sh-seg-hrs">${escHtml(shift.hoursLabel)}</span>
+              ${shift.isLive ? `<span class="tl2-sh-live-tag">LIVE</span>` : ""}
+            </span>
+            <span class="tl2-sh-seg-right">
+              <span class="tl2-sh-seg-util ${toneCls}">${escHtml(utilStr)}</span>
+              <span class="tl2-sh-seg-pcs">${parts} pcs</span>
+            </span>
+          `;
+        } else if (pxW >= 114) {
+          inner = `
+            <span class="tl2-sh-seg-left">
+              <span class="tl2-sh-seg-name">${escHtml(shift.code)}</span>
+              ${!shift.isDay ? `<span class="tl2-sh-seg-hrs">${escHtml(shift.hoursLabel)}</span>` : ""}
+            </span>
+            <span class="tl2-sh-seg-right">
+              <span class="tl2-sh-seg-util ${toneCls}">${escHtml(utilStr)}</span>
+              ${pxW >= 156 ? `<span class="tl2-sh-seg-pcs">${parts}p</span>` : ""}
+            </span>
+          `;
+        } else if (pxW >= 54) {
+          inner = `
+            <span class="tl2-sh-seg-name">${escHtml(shift.code)}</span>
+            <span class="tl2-sh-seg-util ${toneCls}">${escHtml(utilStr)}</span>
+          `;
+        } else if (pxW >= 26) {
+          inner = `<span class="tl2-sh-seg-name">${escHtml(shift.code)}</span>`;
+        }
+
+        const aria = `${shift.name} ${shift.hoursLabel} IST, ${utilPct != null ? `${utilPct}% cutting utilization` : "no telemetry"}, ${parts} parts`;
+        return `
+          <button
+            type="button"
+            class="tl2-shift-seg ${toneCls}${shift.isLive ? " is-live" : ""}${isActive ? " is-active" : ""}${pxW < 114 ? " is-compact" : ""}"
+            style="left:${shift.leftPct.toFixed(3)}%;width:${shift.widthPct.toFixed(3)}%"
+            data-shift-idx="${idx}"
+            aria-label="${escHtml(aria)}"
+          >
+            <span class="tl2-shift-seg-in">${inner}</span>
+            <span class="tl2-shift-seg-bar"><i class="${toneCls}" style="width:${barW}%"></i></span>
+          </button>
+        `;
+      })
+      .join("");
+
+    track.innerHTML = html;
+  }
+
+  // ---- Shift Summary Row Hover Callout & Click-to-Inspect ----
+  if (refs.shiftTrack) {
+    refs.shiftTrack.addEventListener("mousemove", (e) => {
+      updateCrosshair(e.clientX);
+      if (ctx.dragging || ctx.drawerItem) return;
+      const btn = e.target.closest("[data-shift-idx]");
+      if (!btn) {
+        refs.callout.hidden = true;
+        return;
+      }
+      const idx = Number(btn.dataset.shiftIdx);
+      const entry = ctx.shiftSegments[idx];
+      if (!entry) return;
+      const { shift, report } = entry;
+      const tagCol = report.utilPct == null
+        ? "#94a3b8"
+        : report.utilPct >= 75
+          ? "#4ade80"
+          : report.utilPct >= 50
+            ? "#fbbf24"
+            : "#fb7185";
+      refs.callout.innerHTML = `
+        <div class="tl2-co-head">
+          <span class="tl2-co-title">${escHtml(shift.name)} · ${escHtml(shift.hoursLabel)} IST</span>
+          <span class="tl2-co-tag" style="color:${tagCol}">${report.utilPct != null ? `${report.utilPct}% cut` : (shift.isFuture ? "Upcoming" : "No signal")}</span>
+        </div>
+        <div class="tl2-co-grid">
+          <span class="tl2-co-k">Date</span><span class="tl2-co-v">${escHtml(shift.dayLabel)}</span>
+          <span class="tl2-co-k">Parts Cut</span><span class="tl2-co-v">${report.totalParts} pcs (${report.partsPerHr}/hr)</span>
+          <span class="tl2-co-k">Cutting / Loss</span><span class="tl2-co-v">${fmtDurCompact(report.cutMs)} / ${fmtDurCompact(report.lossMs)}</span>
+          <span class="tl2-co-k">Active Machines</span><span class="tl2-co-v">${report.activeMachines} / ${report.totalMachines}</span>
+        </div>
+        <div class="tl2-co-foot">Click for full shift summary &amp; machine breakdown</div>
+      `;
+      refs.callout.hidden = false;
+      placeCallout(e.clientX, e.clientY);
+    });
+
+    refs.shiftTrack.addEventListener("mouseleave", () => {
+      if (!ctx.dragging) hideCrosshair();
+    });
+
+    refs.shiftTrack.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-shift-idx]");
+      if (!btn) return;
+      const idx = Number(btn.dataset.shiftIdx);
+      const entry = ctx.shiftSegments[idx];
+      if (!entry) return;
+      refs.callout.hidden = true;
+      const r = btn.getBoundingClientRect();
+      openShiftDrawer(entry.shift, r.left + r.width / 2, r.bottom + 8);
+    });
+  }
+
   function renderDirty() {
     const { from, to, span } = windowSpan();
+    const shouldRefreshShifts = ctx.dirtyAxis || ctx.dirtyLanes || ctx.dirtySummary;
     if (ctx.dirtyAxis) {
       paintAxis(from, to, span);
       ctx.dirtyAxis = false;
@@ -1946,6 +2127,9 @@ export function mountTimeline(body, dataLayer) {
     if (ctx.dirtySummary) {
       updateSummariesAndGutters(from, to);
       ctx.dirtySummary = false;
+    }
+    if (shouldRefreshShifts) {
+      renderShiftBand(from, to, span);
     }
   }
 
@@ -2081,11 +2265,9 @@ export function mountTimeline(body, dataLayer) {
     placeCallout(e.clientX, e.clientY);
   }
 
-  function placePopup(clientX, clientY) {
+  function placePopup(clientX, clientY, preferBelow = false) {
     const el = refs.drawer;
-    const r = el.getBoundingClientRect();
-    const w = r.width || 448;
-    const h = r.height || 460;
+    el.style.maxHeight = "";
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const nav = document.querySelector(".godnav");
@@ -2093,13 +2275,38 @@ export function mountTimeline(body, dataLayer) {
     const GAP = 14;
     const MARGIN = 12;
 
-    let x = clientX + GAP;
-    if (x + w > vw - MARGIN) x = clientX - w - GAP;
-    x = Math.max(MARGIN, Math.min(vw - w - MARGIN, x));
+    const w = el.offsetWidth || el.getBoundingClientRect().width || 464;
+    let h = el.offsetHeight || el.getBoundingClientRect().height || 460;
 
-    let y = clientY - Math.min(h * 0.35, 160);
-    if (y + h > vh - MARGIN) y = vh - h - MARGIN;
-    if (y < topBound) y = topBound;
+    let x;
+    let y;
+    if (preferBelow) {
+      x = clientX - w / 2;
+      x = Math.max(MARGIN, Math.min(vw - w - MARGIN, x));
+      y = Math.max(topBound, clientY);
+      const availBelow = vh - y - MARGIN;
+      if (availBelow >= 420) {
+        if (h > availBelow) {
+          el.style.maxHeight = `${Math.floor(availBelow)}px`;
+          h = availBelow;
+        }
+      } else if (y + h > vh - MARGIN) {
+        y = Math.max(topBound, vh - h - MARGIN);
+      }
+    } else {
+      x = clientX + GAP;
+      if (x + w > vw - MARGIN) x = clientX - w - GAP;
+      x = Math.max(MARGIN, Math.min(vw - w - MARGIN, x));
+
+      const maxAvail = Math.max(360, vh - topBound - MARGIN);
+      if (h > maxAvail) {
+        el.style.maxHeight = `${Math.floor(maxAvail)}px`;
+        h = maxAvail;
+      }
+      y = clientY - Math.min(h * 0.35, 160);
+      if (y + h > vh - MARGIN) y = vh - h - MARGIN;
+      if (y < topBound) y = topBound;
+    }
 
     el.style.left = `${Math.round(x)}px`;
     el.style.top = `${Math.round(y)}px`;
@@ -2115,9 +2322,57 @@ export function mountTimeline(body, dataLayer) {
     openDrawer(lane, hit, e.clientX, e.clientY);
   }
 
+  async function ensureShiftDataLoaded(shift) {
+    if (!shift || ctx.destroyed) return;
+    const reqFrom = shift.t0;
+    const reqTo = Math.min(shift.t1, Date.now());
+    if (reqTo <= reqFrom + 5000) return;
+    const covered = ctx.cover.has && ctx.cover.from <= reqFrom + 60e3 && ctx.cover.to >= reqTo - 60e3;
+    if (covered) return;
+
+    if (ctx.drawerItem?.hit?.type === "shift" && ctx.drawerItem.hit.data?.id === shift.id) {
+      ctx.drawerItem.shiftLoading = true;
+      renderActivePopup();
+    }
+    showLoading(true);
+    try {
+      const bulk = await dataLayer.timelineBulk(reqFrom, reqTo);
+      if (ctx.destroyed) return;
+      const byMachine = new Map(bulk.lanes.map((l) => [l.machine, l]));
+      applyBulk(byMachine, { from: reqFrom, to: reqTo }, true);
+      growCover(reqFrom, reqTo, true);
+      markDirty({ all: true });
+    } catch {}
+    finally {
+      showLoading(false);
+      if (ctx.drawerItem?.hit?.type === "shift" && ctx.drawerItem.hit.data?.id === shift.id) {
+        ctx.drawerItem.shiftLoading = false;
+        renderActivePopup();
+      }
+    }
+  }
+
+  function zoomTimelineToShift(shift) {
+    if (!shift) return;
+    closeDrawer();
+    const span = Math.max(MIN_SPAN, shift.t1 - shift.t0);
+    ctx.spanMs = span;
+    ctx.presetKey = shift.isDay ? "24h" : "shift";
+    ctx.live = false;
+    ctx.anchor = shift.t1;
+    ctx.cover.has = false;
+    syncPresetBtns();
+    paintWinLabel();
+    markDirty({ all: true });
+    loadBuffer(true);
+    refreshExpandedSeries();
+  }
+
   function renderActivePopup() {
     const item = ctx.drawerItem;
     if (!item) return;
+    const isShift = item.hit?.type === "shift";
+    refs.drawer.classList.add("is-shift-pop");
     renderTimelinePopup({
       refs,
       state: {
@@ -2125,8 +2380,13 @@ export function mountTimeline(body, dataLayer) {
         hit: item.hit,
         activeTab: item.activeTab,
         ncCtx: item.ncCtx,
-        overview: ctx.over.get(item.lane.id) || null,
-        laneEvents: ctx.events.get(item.lane.id) || [],
+        overview: item.lane ? (ctx.over.get(item.lane.id) || null) : null,
+        laneEvents: item.lane ? (ctx.events.get(item.lane.id) || []) : [],
+        allLanes: ctx.lanes,
+        overviewMap: ctx.over,
+        eventsMap: ctx.events,
+        downtimeLogs: ctx.downtimeLogs,
+        shiftLoading: !!item.shiftLoading,
         fleetStore,
       },
       actions: {
@@ -2153,6 +2413,32 @@ export function mountTimeline(body, dataLayer) {
           ctx.drawerItem.activeTab = "job";
           renderActivePopup();
         },
+        selectShift(nextShift) {
+          if (!ctx.drawerItem || !nextShift) return;
+          ctx.drawerItem.hit = { type: "shift", data: nextShift };
+          ctx.drawerItem.shiftLoading = false;
+          ctx.lastShiftSig = "";
+          markDirty({ summary: true });
+          renderActivePopup();
+          ensureShiftDataLoaded(nextShift);
+        },
+        zoomToShift(shift) {
+          zoomTimelineToShift(shift);
+        },
+        jumpToLive() {
+          closeDrawer();
+          jumpToNow();
+        },
+        focusMachineTrace(mid) {
+          closeDrawer();
+          const lane = ctx.lanes.get(mid);
+          if (!lane) return;
+          if (!ctx.expanded.has(mid)) toggleExpand(mid);
+          lane.groupEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        },
+        closeDrawer() {
+          closeDrawer();
+        },
         onDowntimeMutated(nextLogs) {
           ctx.downtimeLogs = nextLogs;
           markDirty({ lanes: true, summary: true });
@@ -2160,7 +2446,24 @@ export function mountTimeline(body, dataLayer) {
         },
       },
     });
-    placePopup(item.anchorX, item.anchorY);
+    placePopup(item.anchorX, item.anchorY, isShift);
+  }
+
+  function openShiftDrawer(shift, clientX = window.innerWidth / 2, clientY = 220) {
+    ctx.drawerItem = {
+      lane: null,
+      hit: { type: "shift", data: shift },
+      ncCtx: null,
+      activeTab: "shift_overview",
+      anchorX: clientX,
+      anchorY: clientY,
+      shiftLoading: false,
+    };
+    ctx.lastShiftSig = "";
+    markDirty({ summary: true });
+    refs.drawerBackdrop.hidden = false;
+    renderActivePopup();
+    ensureShiftDataLoaded(shift);
   }
 
   function openDrawer(lane, hit, clientX = window.innerWidth / 2, clientY = 180) {
@@ -2178,8 +2481,14 @@ export function mountTimeline(body, dataLayer) {
   }
 
   function closeDrawer() {
+    const wasShift = ctx.drawerItem?.hit?.type === "shift";
     ctx.drawerItem = null;
+    refs.drawer.classList.remove("is-shift-pop");
     refs.drawerBackdrop.hidden = true;
+    if (wasShift) {
+      ctx.lastShiftSig = "";
+      markDirty({ summary: true });
+    }
   }
 
   refs.drawerClose.addEventListener("click", closeDrawer);
@@ -2255,6 +2564,9 @@ export function mountTimeline(body, dataLayer) {
       window.removeEventListener("vmc-theme", onTheme);
       document.removeEventListener("click", onDocClick);
       document.removeEventListener("keydown", onKeyDown);
+      if (refs.drawerBackdrop && refs.drawerBackdrop.parentNode) {
+        refs.drawerBackdrop.parentNode.removeChild(refs.drawerBackdrop);
+      }
     },
   };
 }

@@ -712,8 +712,81 @@ export function resolveNcContext(lane, hit, overview = null) {
 }
 
 /**
+ * Clip machine state bands strictly to [t0, t1] and summarize Cutting, Feed-Hold,
+ * Idle, and Fault (Alarm / E-Stop) durations, shares, and incident counts.
+ */
+export function clipStateBreakdown(bands = [], t0, t1, events = [], fallbackCutMs = null) {
+  const spanMs = Math.max(0, t1 - t0);
+  let cutMs = 0;
+  let holdMs = 0;
+  let idleMs = 0;
+  let alarmMs = 0;
+  let offMs = 0;
+  let holdsCount = 0;
+  let alarmBandCount = 0;
+
+  for (const b of Array.isArray(bands) ? bands : []) {
+    if (!b || b.t1 <= t0 || b.t0 >= t1) continue;
+    const d = Math.min(b.t1, t1) - Math.max(b.t0, t0);
+    if (d <= 0) continue;
+    const st = String(b.status || "idle").toLowerCase();
+    if (st === "running") cutMs += d;
+    else if (st === "paused") {
+      holdMs += d;
+      holdsCount++;
+    } else if (st === "alarm") {
+      alarmMs += d;
+      alarmBandCount++;
+    } else if (st === "offline") offMs += d;
+    else idleMs += d;
+  }
+
+  let activeMs = cutMs + holdMs + idleMs + alarmMs;
+  if (activeMs <= 0 && fallbackCutMs != null && spanMs > 0) {
+    cutMs = Math.max(0, Math.min(spanMs, fallbackCutMs));
+    idleMs = Math.max(0, spanMs - cutMs);
+    activeMs = cutMs + idleMs;
+  }
+
+  let estopsCount = 0;
+  let alarmsEvCount = 0;
+  let holdEvCount = 0;
+  for (const e of Array.isArray(events) ? events : []) {
+    if (!e || e.ts < t0 - 5e3 || e.ts > t1 + 5e3 || e.rule === "program") continue;
+    const txt = `${e.rule || ""} ${e.msg || ""}`.toLowerCase();
+    if (/estop|e-stop|emergency/.test(txt)) estopsCount++;
+    else if (/alarm|fault/.test(txt) || e.sev === "CRITICAL") alarmsEvCount++;
+    else if (/hold|pause/.test(txt)) holdEvCount++;
+  }
+
+  const lossMs = holdMs + idleMs + alarmMs;
+  const pct1 = (v) => (activeMs > 0 ? Math.round((v / activeMs) * 1000) / 10 : 0);
+  const cutSharePct = pct1(cutMs);
+  const nonCutSharePct = activeMs > 0 ? Math.max(0, Math.round((100 - cutSharePct) * 10) / 10) : 0;
+
+  return {
+    activeMs,
+    cutMs,
+    holdMs,
+    idleMs,
+    alarmMs,
+    offMs,
+    lossMs,
+    cutSharePct,
+    nonCutSharePct,
+    holdSharePct: pct1(holdMs),
+    idleSharePct: pct1(idleMs),
+    alarmSharePct: pct1(alarmMs),
+    holdsCount: Math.max(holdsCount, holdEvCount),
+    estopsCount,
+    alarmsCount: Math.max(alarmsEvCount, estopsCount === 0 ? alarmBandCount : 0),
+    hasData: activeMs > 0,
+  };
+}
+
+/**
  * Compute Full NC program run analytics, mini-timeline strip geometry, quality split,
- * 24-segment cutting utilization meter, and clickable job list.
+ * clipped state breakdown, 24-segment cutting utilization meter, and clickable job list.
  */
 export function buildFullNcReport({ group, groupParts = [], bands = [], events = [], liveMeta = null }) {
   if (!group && !groupParts.length && !liveMeta) return null;
@@ -765,29 +838,65 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
     .filter((e) => e && e.ts >= t0 - 10e3 && e.ts <= t1 + 10e3 && e.rule !== "program")
     .sort((a, b) => b.ts - a.ts);
 
-  // Build proportional mini-strip blocks across [t0, t1]
+  // Build proportional real-timeline mini-strip blocks across [t0, t1]
   const miniStrip = [];
+  const nonRunBands = (Array.isArray(bands) ? bands : [])
+    .filter((b) => b && b.status !== "running" && b.t1 > t0 && b.t0 < t1)
+    .slice()
+    .sort((a, b) => a.t0 - b.t0);
+
+  let gapSeq = 0;
+  const pushGapSpan = (gStart, gEnd) => {
+    if (gEnd <= gStart + 10_000) return;
+    let emitted = false;
+    for (const b of nonRunBands) {
+      if (b.t1 <= gStart || b.t0 >= gEnd) continue;
+      const s0 = Math.max(gStart, b.t0);
+      const s1 = Math.min(gEnd, b.t1);
+      if (s1 <= s0 + 5_000) continue;
+      emitted = true;
+      miniStrip.push({
+        kind: "gap",
+        id: `gap_${++gapSeq}`,
+        t0: s0,
+        t1: s1,
+        durMs: s1 - s0,
+        leftPct: Math.max(0, ((s0 - t0) / wallMs) * 100),
+        widthPct: Math.max(0.6, ((s1 - s0) / wallMs) * 100),
+        statusKind: String(b.status || "idle").toLowerCase(),
+      });
+    }
+    if (!emitted) {
+      miniStrip.push({
+        kind: "gap",
+        id: `gap_${++gapSeq}`,
+        t0: gStart,
+        t1: gEnd,
+        durMs: gEnd - gStart,
+        leftPct: Math.max(0, ((gStart - t0) / wallMs) * 100),
+        widthPct: Math.max(0.6, ((gEnd - gStart) / wallMs) * 100),
+        statusKind: "idle",
+      });
+    }
+  };
+
   let cursor = t0;
   for (let i = 0; i < sortedParts.length; i++) {
     const p = sortedParts[i];
-    if (p.t0 > cursor + 15_000) {
-      const gapBand = bands.find((b) => b && b.status !== "running" && b.t1 > cursor && b.t0 < p.t0);
-      miniStrip.push({
-        kind: "gap",
-        id: `gap_${i}`,
-        t0: cursor,
-        t1: p.t0,
-        durMs: p.t0 - cursor,
-        leftPct: ((cursor - t0) / wallMs) * 100,
-        widthPct: ((p.t0 - cursor) / wallMs) * 100,
-        statusKind: gapBand ? String(gapBand.status || "idle").toLowerCase() : "idle",
-      });
-    }
+    pushGapSpan(cursor, p.t0);
     const stKind = partDeviationKind(p);
+    const devPct = p.dev != null && Number.isFinite(p.dev)
+      ? Math.round((p.dev - 1) * 100)
+      : (baselineMs && p.dur ? Math.round(((p.dur / baselineMs) - 1) * 100) : null);
+    const label = p.job != null
+      ? (typeof p.job === "number" ? `#${p.job}` : String(p.job).slice(0, 6))
+      : `#${i + 1}`;
     miniStrip.push({
       kind: "part",
       id: partKeyOf(p),
       job: p.job,
+      label,
+      devPct,
       index: i + 1,
       t0: p.t0,
       t1: p.t1,
@@ -800,22 +909,13 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
     cursor = Math.max(cursor, p.t1);
   }
   if (liveMeta) {
-    if (liveMeta.t0 > cursor + 15_000) {
-      miniStrip.push({
-        kind: "gap",
-        id: "gap_live",
-        t0: cursor,
-        t1: liveMeta.t0,
-        durMs: liveMeta.t0 - cursor,
-        leftPct: ((cursor - t0) / wallMs) * 100,
-        widthPct: ((liveMeta.t0 - cursor) / wallMs) * 100,
-        statusKind: "idle",
-      });
-    }
+    pushGapSpan(cursor, liveMeta.t0);
     miniStrip.push({
       kind: "live",
       id: "__LIVE__",
       job: "LIVE",
+      label: "LIVE",
+      devPct: null,
       index: sortedParts.length + 1,
       t0: liveMeta.t0,
       t1: liveMeta.t1,
@@ -824,7 +924,20 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
       widthPct: Math.max(2, ((Math.max(1000, liveMeta.t1 - liveMeta.t0)) / wallMs) * 100),
       statusKind: "live",
     });
+    cursor = Math.max(cursor, liveMeta.t1);
   }
+  pushGapSpan(cursor, t1);
+
+  const miniPins = incidents
+    .filter((e) => e && e.ts >= t0 && e.ts <= t1)
+    .slice(0, 14)
+    .map((e) => ({
+      ts: e.ts,
+      leftPct: Math.max(1.5, Math.min(98.5, ((e.ts - t0) / wallMs) * 100)),
+      sev: e.sev || "INFO",
+      rule: e.rule || "event",
+      msg: e.msg || e.rule || "Event",
+    }));
 
   // Clickable chronological job rows (newest first, matching precision tracker list)
   const jobRows = [];
@@ -890,6 +1003,8 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
     insight = `Clean NC batch — ${completed.length} completed cycle${completed.length === 1 ? "" : "s"} at ${utilPct}% cutting utilization.`;
   }
 
+  const stateBreakdown = clipStateBreakdown(bands, t0, t1, incidents, cutMs);
+
   return {
     programRaw: group?.program || liveMeta?.program || "Program",
     programName: cleanProgName(group?.program || liveMeta?.program),
@@ -899,6 +1014,7 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
     cutMs,
     gapMs,
     utilPct,
+    stateBreakdown,
     totalJobs: sortedParts.length + (liveMeta ? 1 : 0),
     completedCount: completed.length,
     partialCount: qualityCounts.partial,
@@ -913,6 +1029,7 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
     healthBadge,
     meter,
     miniStrip,
+    miniPins,
     jobRows,
     sortedParts,
     incidents,
@@ -924,7 +1041,7 @@ export function buildFullNcReport({ group, groupParts = [], bands = [], events =
  * Compute Single Job diagnostic report: 24-segment pace meter, range bar needle,
  * 5-axis grounded radar vs NC baseline, pre-cycle gap, batch rank, and insight.
  */
-export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = null, events = [], overview = null }) {
+export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = null, bands = [], events = [], overview = null }) {
   const isLive = !part && !!liveMeta;
   if (!part && !liveMeta) return null;
 
@@ -1046,6 +1163,8 @@ export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = nu
     insight = `Clean nominal cycle${devPct != null ? ` (${devPct >= 0 ? "+" : ""}${devPct}% vs baseline)` : ""} with zero controller interruptions.`;
   }
 
+  const stateBreakdown = clipStateBreakdown(bands, t0, t1, incidents, durMs);
+
   return {
     isLive,
     partKey: key,
@@ -1056,6 +1175,7 @@ export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = nu
     t1,
     durMs,
     remainingMs: isLive ? liveMeta.remainingMs : null,
+    totalEstMs: isLive ? liveMeta.totalEstMs : null,
     baselineMs,
     devPct,
     efficiencyPct,
@@ -1063,6 +1183,7 @@ export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = nu
     badge,
     meter,
     rangeNeedle,
+    stateBreakdown,
     chronoIdx,
     totalInRun,
     speedRank: speedRank && speedRank > 0 ? speedRank : null,
@@ -1070,6 +1191,8 @@ export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = nu
     preGapMs,
     spindleRpm: isLive ? liveMeta.spindleRpm : (Number.isFinite(overview?.spindle_speed) ? Math.round(overview.spindle_speed) : null),
     feedOvrd: feedVal,
+    rapidOvrd: liveMeta?.rapidOvrd ?? (Number.isFinite(overview?.overrides?.rapid) ? Math.round(overview.overrides.rapid) : null),
+    spindleOvrd: liveMeta?.spindleOvrd ?? (Number.isFinite(overview?.overrides?.spindle) ? Math.round(overview.overrides.spindle) : null),
     toolId: liveMeta?.toolId || overview?.tool_id || null,
     radar,
     incidents,
@@ -1078,4 +1201,459 @@ export function buildSingleJobReport({ part = null, liveMeta = null, fullNc = nu
     nextPart: !isLive && chronoIdx < sortedParts.length ? sortedParts[chronoIdx] : null,
   };
 }
+
+const SHIFT_DEFS = [
+  { shiftNum: 1, startHour: 6, code: "S1", name: "Shift 1", hoursLabel: "06–14" },
+  { shiftNum: 2, startHour: 14, code: "S2", name: "Shift 2", hoursLabel: "14–22" },
+  { shiftNum: 3, startHour: 22, code: "S3", name: "Shift 3", hoursLabel: "22–06" },
+];
+
+function makeShiftDescriptor(dayStartMs, def, winT0, winT1, nowMs) {
+  const t0 = dayStartMs + def.startHour * 3600e3;
+  const t1 = t0 + 8 * 3600e3;
+  const span = Math.max(1, winT1 - winT0);
+  const visT0 = Math.max(winT0, t0);
+  const visT1 = Math.min(winT1, t1);
+  const isFuture = t0 > nowMs;
+  const isLive = nowMs >= t0 && nowMs < t1;
+  const effEnd = isFuture ? t0 : Math.min(t1, nowMs);
+  const elapsedMs = Math.max(0, effEnd - t0);
+  return {
+    id: `shift_${t0}`,
+    shiftNum: def.shiftNum,
+    code: def.code,
+    name: def.name,
+    hoursLabel: def.hoursLabel,
+    dayLabel: fmtDayIST(t0),
+    t0,
+    t1,
+    effEnd,
+    elapsedMs,
+    visT0,
+    visT1,
+    leftPct: Math.max(0, ((visT0 - winT0) / span) * 100),
+    widthPct: Math.max(0, ((visT1 - visT0) / span) * 100),
+    isLive,
+    isFuture,
+  };
+}
+
+/**
+ * Enumerate every IST 8-hour shift (S1 06-14, S2 14-22, S3 22-06) overlapping [winT0, winT1].
+ */
+export function enumerateWindowShifts(winT0, winT1, nowMs = Date.now()) {
+  const out = [];
+  if (!Number.isFinite(winT0) || !Number.isFinite(winT1) || winT1 <= winT0) return out;
+  const firstDay = istDayStart(winT0) - 86400e3;
+  const lastDay = istDayStart(winT1) + 86400e3;
+  for (let d = firstDay; d <= lastDay; d += 86400e3) {
+    for (const def of SHIFT_DEFS) {
+      const t0 = d + def.startHour * 3600e3;
+      const t1 = t0 + 8 * 3600e3;
+      if (t1 <= winT0 || t0 >= winT1) continue;
+      const item = makeShiftDescriptor(d, def, winT0, winT1, nowMs);
+      if (item.widthPct > 0.05) out.push(item);
+    }
+  }
+  return out;
+}
+
+/**
+ * Enumerate IST calendar days overlapping [winT0, winT1] for multi-day zoom ranges (7d / 30d).
+ */
+export function enumerateWindowDays(winT0, winT1, nowMs = Date.now()) {
+  const out = [];
+  if (!Number.isFinite(winT0) || !Number.isFinite(winT1) || winT1 <= winT0) return out;
+  const span = Math.max(1, winT1 - winT0);
+  const firstDay = istDayStart(winT0);
+  const lastDay = istDayStart(winT1);
+  for (let d = firstDay; d <= lastDay; d += 86400e3) {
+    const t0 = d;
+    const t1 = d + 86400e3;
+    if (t1 <= winT0 || t0 >= winT1) continue;
+    const visT0 = Math.max(winT0, t0);
+    const visT1 = Math.min(winT1, t1);
+    const isFuture = t0 > nowMs;
+    const isLive = nowMs >= t0 && nowMs < t1;
+    const effEnd = isFuture ? t0 : Math.min(t1, nowMs);
+    out.push({
+      id: `day_${t0}`,
+      isDay: true,
+      code: fmtDayIST(t0).replace(/,.*/, ""),
+      name: fmtDayIST(t0),
+      dayLabel: fmtDayIST(t0),
+      hoursLabel: "00–24",
+      t0,
+      t1,
+      effEnd,
+      elapsedMs: Math.max(0, effEnd - t0),
+      visT0,
+      visT1,
+      leftPct: Math.max(0, ((visT0 - winT0) / span) * 100),
+      widthPct: Math.max(0, ((visT1 - visT0) / span) * 100),
+      isLive,
+      isFuture,
+    });
+  }
+  return out;
+}
+
+/**
+ * Step to the previous (-1) or next (+1) IST 8-hour shift relative to `shift`.
+ */
+export function getAdjacentShift(shift, delta, nowMs = Date.now()) {
+  if (!shift || !Number.isFinite(shift.t0)) return null;
+  const targetT0 = shift.t0 + delta * 8 * 3600e3;
+  const targetT1 = targetT0 + 8 * 3600e3;
+  if (delta > 0 && targetT0 > nowMs) return null;
+  const ist = new Date(targetT0 + IST_OFFSET_MS);
+  const h = ist.getUTCHours();
+  const def = SHIFT_DEFS.find((d) => d.startHour === h) || SHIFT_DEFS[0];
+  const dayStart = istDayStart(targetT0);
+  return makeShiftDescriptor(dayStart, def, targetT0, targetT1, nowMs);
+}
+
+/**
+ * Build a complete fleet-wide summary report for a single IST shift (or day) clipped strictly
+ * to `[shift.t0, Math.min(shift.t1, nowMs)]` across all visible machines.
+ */
+export function buildShiftSummaryReport({
+  shift,
+  lanes = [],
+  overviewMap = null,
+  eventsMap = null,
+  downtimeLogs = [],
+  nowMs = Date.now(),
+}) {
+  if (!shift || !Number.isFinite(shift.t0) || !Number.isFinite(shift.t1)) return null;
+  const laneList = Array.isArray(lanes) ? lanes : [...lanes.values()];
+  const t0 = shift.t0;
+  const t1 = shift.t1;
+  const effEnd = Math.max(t0, Math.min(t1, nowMs));
+  const elapsedMs = Math.max(0, effEnd - t0);
+  const isLive = nowMs >= t0 && nowMs < t1;
+  const isFuture = t0 > nowMs;
+
+  let cutMs = 0;
+  let idleMs = 0;
+  let holdMs = 0;
+  let alarmMs = 0;
+  let offlineMs = 0;
+  let totalParts = 0;
+  let activeMachines = 0;
+  let onlineMachines = 0;
+
+  const qualityCounts = { normal: 0, high: 0, over: 0, low: 0, partial: 0, neutral: 0 };
+  const allCompletedDurs = [];
+  const progMap = new Map(); // cleanName -> { name, parts, cutMs, durs[], nominal, machines: Set }
+  const machineRows = [];
+
+  for (const lane of laneList) {
+    if (!lane) continue;
+    const sum = elapsedMs > 0
+      ? summarizeLaneWindow(lane.parts, lane.bands, t0, effEnd)
+      : { cutMs: 0, idleMs: 0, holdMs: 0, alarmMs: 0, offlineMs: 0, lossMs: 0, totalMs: 0, utilPct: null, partCount: 0, slowCount: 0, shortCount: 0 };
+
+    cutMs += sum.cutMs;
+    idleMs += sum.idleMs;
+    holdMs += sum.holdMs;
+    alarmMs += sum.alarmMs;
+    offlineMs += sum.offlineMs;
+    totalParts += sum.partCount;
+    if (sum.cutMs > 0 || sum.partCount > 0) activeMachines += 1;
+    if (sum.cutMs + sum.idleMs + sum.holdMs + sum.alarmMs > 0) onlineMachines += 1;
+
+    const shiftParts = (Array.isArray(lane.parts) ? lane.parts : []).filter(
+      (p) => p && p.t1 >= t0 && p.t0 <= effEnd,
+    );
+    const machineProgCounts = new Map();
+    for (const p of shiftParts) {
+      const k = partDeviationKind(p);
+      qualityCounts[k] = (qualityCounts[k] || 0) + 1;
+      const dur = Number.isFinite(p.dur) && p.dur > 0 ? p.dur : Math.max(0, p.t1 - p.t0);
+      if (!p.partial && dur > 0) allCompletedDurs.push(dur);
+
+      const pname = cleanProgName(p.program);
+      machineProgCounts.set(pname, (machineProgCounts.get(pname) || 0) + 1);
+      if (!p.partial) {
+        let rec = progMap.get(pname);
+        if (!rec) {
+          rec = { name: pname, parts: 0, cutMs: 0, durs: [], nominal: 0, machines: new Set() };
+          progMap.set(pname, rec);
+        }
+        rec.parts += 1;
+        rec.cutMs += dur;
+        if (dur > 0) rec.durs.push(dur);
+        if (k === "normal" || k === "neutral") rec.nominal += 1;
+        rec.machines.add(lane.id);
+      }
+    }
+
+    let topProgram = "";
+    let topProgN = 0;
+    for (const [pn, cnt] of machineProgCounts) {
+      if (cnt > topProgN) {
+        topProgN = cnt;
+        topProgram = pn;
+      }
+    }
+
+    const mEvents = eventsMap && eventsMap.get ? (eventsMap.get(lane.id) || []) : [];
+    const shiftIncidents = mEvents.filter((e) => e && e.ts >= t0 && e.ts <= effEnd && e.rule !== "program");
+    const estopCount = shiftIncidents.filter((e) => e.rule === "estop").length;
+    const alarmCount = shiftIncidents.filter((e) => e.rule !== "estop" && (e.sev === "CRITICAL" || e.rule === "alarm" || e.rule === "offline")).length;
+    const holdEventCount = shiftIncidents.filter((e) => e.rule === "feed_hold" || e.rule === "override" || e.sev === "WARNING").length;
+
+    // Count distinct paused bands in this shift as holds if no explicit hold events exist
+    let holdBandsCount = 0;
+    for (const b of Array.isArray(lane.bands) ? lane.bands : []) {
+      if (b && b.status === "paused" && b.t1 > t0 && b.t0 < effEnd && (Math.min(effEnd, b.t1) - Math.max(t0, b.t0)) >= 5000) {
+        holdBandsCount += 1;
+      }
+    }
+    const machineHolds = Math.max(holdEventCount, holdBandsCount);
+
+    const ov = overviewMap && overviewMap.get ? overviewMap.get(lane.id) : null;
+    const liveStatus = ov
+      ? (ov.online === false ? "offline" : String(ov.status || "idle").toLowerCase())
+      : (sum.cutMs > 0 ? "running" : sum.offlineMs > 0 && sum.utilPct === 0 ? "offline" : "idle");
+    const liveRpm = ov && ov.online !== false && Number.isFinite(Number(ov.spindle_speed))
+      ? Math.round(Number(ov.spindle_speed))
+      : null;
+    const liveFeedOvr = ov && ov.online !== false && ov.overrides && Number.isFinite(Number(ov.overrides.feed))
+      ? Math.round(Number(ov.overrides.feed))
+      : null;
+    const liveRapidOvr = ov && ov.online !== false && ov.overrides && Number.isFinite(Number(ov.overrides.rapid))
+      ? Math.round(Number(ov.overrides.rapid))
+      : null;
+    const liveSpindleOvr = ov && ov.online !== false && ov.overrides && Number.isFinite(Number(ov.overrides.spindle))
+      ? Math.round(Number(ov.overrides.spindle))
+      : null;
+
+    machineRows.push({
+      id: lane.id,
+      name: lane.name || lane.id,
+      utilPct: sum.utilPct,
+      cutMs: sum.cutMs,
+      idleMs: sum.idleMs,
+      holdMs: sum.holdMs,
+      alarmMs: sum.alarmMs,
+      offlineMs: sum.offlineMs,
+      lossMs: sum.lossMs,
+      partCount: sum.partCount,
+      slowCount: sum.slowCount,
+      shortCount: sum.shortCount,
+      incidentCount: shiftIncidents.length,
+      estopCount,
+      alarmCount: alarmCount + estopCount,
+      holdsCount: machineHolds,
+      topProgram,
+      liveStatus,
+      rpm: liveRpm,
+      feedOvr: liveFeedOvr,
+      rapidOvr: liveRapidOvr,
+      spindleOvr: liveSpindleOvr,
+    });
+  }
+
+  // Sort machines by utilization descending, then parts descending, then name
+  machineRows.sort((a, b) => {
+    const ua = a.utilPct == null ? -1 : a.utilPct;
+    const ub = b.utilPct == null ? -1 : b.utilPct;
+    if (ub !== ua) return ub - ua;
+    if (b.partCount !== a.partCount) return b.partCount - a.partCount;
+    return String(a.name).localeCompare(String(b.name));
+  });
+
+  const activeDenom = cutMs + idleMs + holdMs + alarmMs;
+  const totalTrackedMs = activeDenom + offlineMs;
+  const hasData = totalTrackedMs > 0 || totalParts > 0;
+  const utilPct = activeDenom > 0 ? Math.round((cutMs / activeDenom) * 100) : (offlineMs > 0 ? 0 : null);
+  const lossMs = idleMs + holdMs + alarmMs;
+
+  const round1 = (v) => Math.round(v * 10) / 10;
+  const cutSharePct = activeDenom > 0 ? round1((cutMs / activeDenom) * 100) : 0;
+  const nonCutSharePct = activeDenom > 0 ? round1((lossMs / activeDenom) * 100) : 0;
+  const holdSharePct = activeDenom > 0 ? round1((holdMs / activeDenom) * 100) : 0;
+  const idleSharePct = activeDenom > 0 ? round1((idleMs / activeDenom) * 100) : 0;
+  const alarmSharePct = activeDenom > 0 ? round1((alarmMs / activeDenom) * 100) : 0;
+
+  const holdsCount = machineRows.reduce((acc, m) => acc + (m.holdsCount || 0), 0);
+  const estopsCount = machineRows.reduce((acc, m) => acc + (m.estopCount || 0), 0);
+  const alarmsCount = machineRows.reduce((acc, m) => acc + Math.max(0, (m.alarmCount || 0) - (m.estopCount || 0)), 0);
+
+  const runningRpms = machineRows.map((m) => m.rpm).filter((v) => v != null && v > 0);
+  const avgRpm = runningRpms.length ? Math.round(runningRpms.reduce((a, b) => a + b, 0) / runningRpms.length) : null;
+  const peakRpm = runningRpms.length ? Math.max(...runningRpms) : null;
+  const avgOf = (vals) => (vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null);
+  const avgFeedOvr = avgOf(machineRows.map((m) => m.feedOvr).filter((v) => v != null));
+  const avgRapidOvr = avgOf(machineRows.map((m) => m.rapidOvr).filter((v) => v != null));
+  const avgSpindleOvr = avgOf(machineRows.map((m) => m.spindleOvr).filter((v) => v != null));
+
+  const mixDenom = Math.max(1, totalTrackedMs);
+  const timeMix = {
+    cutPct: totalTrackedMs > 0 ? (cutMs / mixDenom) * 100 : 0,
+    idlePct: totalTrackedMs > 0 ? (idleMs / mixDenom) * 100 : 0,
+    holdPct: totalTrackedMs > 0 ? (holdMs / mixDenom) * 100 : 0,
+    alarmPct: totalTrackedMs > 0 ? (alarmMs / mixDenom) * 100 : 0,
+    offlinePct: totalTrackedMs > 0 ? (offlineMs / mixDenom) * 100 : 0,
+  };
+
+  const completedCount = qualityCounts.normal + qualityCounts.high + qualityCounts.over + qualityCounts.low + qualityCounts.neutral;
+  const nominalCount = qualityCounts.normal + qualityCounts.neutral;
+  const nominalPct = completedCount > 0 ? Math.round((nominalCount / completedCount) * 100) : null;
+  allCompletedDurs.sort((a, b) => a - b);
+  const medianCycleMs = quantileSorted(allCompletedDurs, 0.5);
+  const bestCycleMs = allCompletedDurs.length ? allCompletedDurs[0] : null;
+  const maxCycleMs = allCompletedDurs.length ? allCompletedDurs[allCompletedDurs.length - 1] : null;
+
+  const hrs = Math.max(0.05, elapsedMs / 3600e3);
+  const partsPerHr = elapsedMs > 0 ? Number((totalParts / hrs).toFixed(1)) : 0;
+
+  // Top NC programs in shift
+  const programs = [...progMap.values()]
+    .map((rec) => {
+      rec.durs.sort((a, b) => a - b);
+      return {
+        name: rec.name,
+        parts: rec.parts,
+        cutMs: rec.cutMs,
+        medianMs: quantileSorted(rec.durs, 0.5),
+        nominalPct: rec.parts > 0 ? Math.round((rec.nominal / rec.parts) * 100) : 0,
+        machinesCount: rec.machines.size,
+      };
+    })
+    .sort((a, b) => (b.parts - a.parts) || (b.cutMs - a.cutMs));
+
+  // Fleet-wide incidents & logged downtime overlapping this shift
+  const incidents = [];
+  if (eventsMap && eventsMap.entries) {
+    const visibleIds = new Set(laneList.map((l) => l.id));
+    for (const [mid, arr] of eventsMap.entries()) {
+      if (visibleIds.size && !visibleIds.has(mid)) continue;
+      for (const e of arr || []) {
+        if (e && e.ts >= t0 && e.ts <= effEnd && e.rule !== "program") {
+          incidents.push({ ...e, machine: e.machine || mid });
+        }
+      }
+    }
+  }
+  incidents.sort((a, b) => b.ts - a.ts);
+
+  const loggedDowntime = (Array.isArray(downtimeLogs) ? downtimeLogs : [])
+    .filter((log) => {
+      if (!log) return false;
+      const ls = Number(log.startTs);
+      const le = ls + Math.max(1, Number(log.durationMin) || 1) * 60e3;
+      return Number.isFinite(ls) && le >= t0 && ls <= effEnd;
+    })
+    .sort((a, b) => Number(b.startTs) - Number(a.startTs));
+
+  // Tone, tactile badge & 24-segment utilization meter
+  const tone = !hasData || utilPct == null
+    ? "neutral"
+    : utilPct >= 75
+      ? "success"
+      : utilPct >= 50
+        ? "warning"
+        : "danger";
+
+  const badge = isFuture
+    ? { tone: "neutral", label: "Upcoming", icon: "clock" }
+    : !hasData || utilPct == null
+      ? { tone: "neutral", label: "No Signal", icon: "clock" }
+      : isLive
+        ? { tone: "info", label: `Live · ${utilPct}%`, icon: "arrow" }
+        : tone === "success"
+          ? { tone: "success", label: `${utilPct}% Optimal`, icon: "check" }
+          : tone === "warning"
+            ? { tone: "warning", label: `${utilPct}% Moderate`, icon: "alert" }
+            : { tone: "danger", label: `${utilPct}% Low Util`, icon: "x" };
+
+  const meter = computeSegmentedMeter(utilPct ?? 0, tone === "neutral" ? "info" : tone, 24);
+
+  // Operational plain-English insight
+  const topMachine = machineRows.find((m) => m.utilPct != null && m.utilPct > 0) || null;
+  const lowMachine = [...machineRows].reverse().find((m) => m.utilPct != null && m.id !== topMachine?.id) || null;
+  let insight = "";
+  let insightTone = tone === "neutral" ? "info" : tone;
+
+  if (isFuture) {
+    insight = `${shift.name} (${shift.hoursLabel} IST) has not started yet.`;
+  } else if (!hasData) {
+    insight = `No telemetry recorded in this window yet — step or zoom to fetch shift history.`;
+  } else {
+    const lossBucket = alarmMs >= holdMs && alarmMs >= idleMs && alarmMs > 0
+      ? `Alarm stops (${fmtDurCompact(alarmMs)})`
+      : holdMs >= idleMs && holdMs > 0
+        ? `Feed-Hold (${fmtDurCompact(holdMs)})`
+        : `Idle gaps (${fmtDurCompact(idleMs)})`;
+
+    if (alarmMs > 0 && incidents.some((e) => e.sev === "CRITICAL")) {
+      insight = `${totalParts} parts cut at ${utilPct}% fleet utilization. Primary bottleneck: ${lossBucket} across ${incidents.length} incident${incidents.length === 1 ? "" : "s"}.`;
+      insightTone = "danger";
+    } else if (utilPct != null && utilPct >= 75) {
+      insight = `Strong shift output — ${totalParts} parts at ${partsPerHr}/hr${topMachine ? `, led by ${topMachine.name} (${topMachine.utilPct}%)` : ""}.`;
+      insightTone = "success";
+    } else {
+      const lagPart = lowMachine && lowMachine.utilPct != null ? ` · lowest: ${lowMachine.name} (${lowMachine.utilPct}%)` : "";
+      insight = `${totalParts} parts cut (${utilPct ?? 0}% utilization). Largest non-cutting loss: ${lossBucket}${lagPart}.`;
+      insightTone = utilPct != null && utilPct < 50 ? "danger" : "warning";
+    }
+  }
+
+  return {
+    shift,
+    t0,
+    t1,
+    effEnd,
+    elapsedMs,
+    isLive,
+    isFuture,
+    hasData,
+    utilPct,
+    cutSharePct,
+    nonCutSharePct,
+    holdSharePct,
+    idleSharePct,
+    alarmSharePct,
+    holdsCount,
+    alarmsCount,
+    estopsCount,
+    avgRpm,
+    peakRpm,
+    avgFeedOvr,
+    avgRapidOvr,
+    avgSpindleOvr,
+    tone,
+    badge,
+    meter,
+    cutMs,
+    idleMs,
+    holdMs,
+    alarmMs,
+    offlineMs,
+    lossMs,
+    totalTrackedMs,
+    timeMix,
+    totalParts,
+    partsPerHr,
+    activeMachines,
+    onlineMachines,
+    totalMachines: laneList.length,
+    qualityCounts,
+    completedCount,
+    nominalPct,
+    medianCycleMs,
+    bestCycleMs,
+    maxCycleMs,
+    machines: machineRows,
+    programs,
+    incidents,
+    loggedDowntime,
+    insight,
+    insightTone,
+  };
+}
+
 

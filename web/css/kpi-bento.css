@@ -5,43 +5,28 @@
  * ==========================================================================*/
 
 :root {
-  --kb-surface: #0e1015;
-  --kb-surface-2: #14171f;
-  --kb-border: rgba(255, 255, 255, 0.085);
-  --kb-border-strong: rgba(255, 255, 255, 0.14);
-  --kb-hairline: rgba(255, 255, 255, 0.065);
-  --kb-track: rgba(255, 255, 255, 0.06);
-  --kb-hover: rgba(255, 255, 255, 0.04);
-  --kb-seg-bg: rgba(255, 255, 255, 0.05);
-  --kb-seg-active: rgba(255, 255, 255, 0.13);
-  --kb-shadow: 0 8px 26px rgba(0, 0, 0, 0.34);
-  --kb-tip-bg: #12151e;
-  --kb-tip-border: rgba(255, 255, 255, 0.14);
-  --kb-tip-text: #f8fafc;
-  --kb-tip-muted: rgba(203, 213, 225, 0.66);
-  --kb-bar-cap: #e2e8f0;
+  --kb-surface: var(--card);
+  --kb-surface-2: var(--sh-surface-2);
+  --kb-border: var(--border);
+  --kb-border-strong: var(--border-strong);
+  --kb-hairline: var(--sh-hairline);
+  --kb-track: var(--sh-track);
+  --kb-hover: var(--sh-hover);
+  --kb-seg-bg: var(--secondary);
+  --kb-seg-active: var(--card);
+  --kb-shadow: var(--sh-shadow-sm);
+  --kb-tip-bg: var(--sh-callout-bg);
+  --kb-tip-border: var(--sh-callout-border);
+  --kb-tip-text: var(--sh-callout-fg);
+  --kb-tip-muted: var(--sh-callout-sub);
+  --kb-bar-cap: var(--foreground);
   --kb-hatch: rgba(255, 255, 255, 0.24);
-  --kb-gridline: rgba(255, 255, 255, 0.06);
+  --kb-gridline: var(--sh-hairline);
 }
 
 [data-theme="light"] {
-  --kb-surface: #ffffff;
-  --kb-surface-2: #f6f8fb;
-  --kb-border: rgba(15, 23, 42, 0.09);
-  --kb-border-strong: rgba(15, 23, 42, 0.16);
-  --kb-hairline: rgba(15, 23, 42, 0.07);
-  --kb-track: #edf0f5;
-  --kb-hover: rgba(15, 23, 42, 0.035);
-  --kb-seg-bg: #eef1f6;
-  --kb-seg-active: #ffffff;
-  --kb-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 8px 22px rgba(15, 23, 42, 0.045);
-  --kb-tip-bg: #11141c;
-  --kb-tip-border: rgba(15, 23, 42, 0.22);
-  --kb-tip-text: #f8fafc;
-  --kb-tip-muted: rgba(203, 213, 225, 0.72);
-  --kb-bar-cap: #0f172a;
+  --kb-shadow: var(--sh-shadow-md);
   --kb-hatch: rgba(255, 255, 255, 0.34);
-  --kb-gridline: rgba(15, 23, 42, 0.07);
 }
 
 /* Root Stack */
