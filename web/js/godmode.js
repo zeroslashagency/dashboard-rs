@@ -1,7 +1,7 @@
 /* VMC God-mode — navigation router + view orchestration.
  *
  * Adds a tabbed nav bar between the topbar and the content. Tabs:
- *   Dashboard | KPI | Analytics | Timeline | Maintenance | Statistics
+ *   Dashboard | KPI | Analytics | Timeline | Fleet Intelligence
  *
  * The Dashboard tab IS the existing mission-card grid (#machineGrid) — we only
  * show/hide it, never touch its render loop or markup. Every other tab mounts an
@@ -15,8 +15,7 @@
 import { dataLayer } from "./dataLayer.js";
 import { mountAnalytical } from "./analytics.js";
 import { mountKpi } from "./kpi.js";
-import { mountStatistics } from "./statistics.js";
-import { mountMaintenance } from "./maintenance.js";
+import { mountFleetIntelligence } from "./fleetIntelligence.js";
 import { mountTimeline } from "./timeline.js";
 import { initAlerts } from "./alerts.js";
 
@@ -29,9 +28,10 @@ const TABS = [
   { id: "kpi", label: "KPI", builder: mountKpi, window: true, title: "KPI Overview", sub: "fleet OEE · stacked throughput · time mix · program drift" },
   { id: "analytics", label: "Analytics", builder: mountAnalytical, window: true, title: "Root-Cause Analytics", sub: "synchronized fleet timeline · downtime Pareto · override discipline · fault diagnostics" },
   { id: "timeline", label: "Timeline", builder: mountTimeline, window: false, title: "Production Timeline", sub: "" },
-  { id: "maintenance", label: "Maintenance", builder: mountMaintenance, window: true, title: "Maintenance", sub: "predictive console — health · risk projections · trends · event log, all from real signals" },
-  { id: "statistics", label: "Statistics", builder: mountStatistics, window: true, title: "Statistics", sub: "cycle distributions, downtime Pareto, reliability, drift" },
+  { id: "fleet", label: "Fleet Intelligence", builder: mountFleetIntelligence, window: true, title: "Fleet Intelligence", sub: "production targets · program-split cycles · downtime causes · reliability & predictive maintenance" },
 ];
+
+const LEGACY_TAB_MAP = { maintenance: "fleet", statistics: "fleet" };
 
 const views = new Map(); // id -> { el, ctl, chrome, refreshTimer, mounted }
 let activeId = null;
@@ -86,8 +86,9 @@ function start() {
     if (v && v.ctl) v.ctl.refresh();
   });
 
-  // restore last tab
-  const initial = localStorage.getItem("vmc_tab") || "dashboard";
+  // restore last tab (seamlessly migrate legacy maintenance/statistics tabs -> fleet)
+  const rawSaved = localStorage.getItem("vmc_tab") || "dashboard";
+  const initial = LEGACY_TAB_MAP[rawSaved] || rawSaved;
   activate(TABS.some((t) => t.id === initial) ? initial : "dashboard");
 }
 

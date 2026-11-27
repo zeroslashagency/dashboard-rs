@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDemoCollectorRouter } from "./demoCollector.ts";
+import { createFleetStoreRouter } from "./fleetStore.ts";
 
 export const DEFAULT_PORT = 3000;
 export const COLLECTOR_PORT_DEFAULT = 9994;
@@ -63,7 +64,10 @@ export function resolveConfig(
 }
 
 export function configJsBody(collectorPort: number, demoMode = true): string {
-  const lines = [`window.__VMC_COLLECTOR_PORT__ = ${collectorPort};`];
+  const lines = [
+    `window.__VMC_COLLECTOR_PORT__ = ${collectorPort};`,
+    `window.__VMC_DEMO_MODE__ = ${demoMode ? "true" : "false"};`,
+  ];
   if (demoMode) {
     lines.push("window.__VMC_API_BASE__ = window.location.origin;");
   }
@@ -167,8 +171,18 @@ export function createApp(cfg: ServerConfig): express.Express {
   app.use((_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (_req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
     next();
   });
+
+  // Fleet Intelligence persistence (targets, downtime root-cause logs, repair logs)
+  const storeBaseDir = path.dirname(fileURLToPath(import.meta.url));
+  app.use("/api/fleet", createFleetStoreRouter(storeBaseDir));
 
   if (cfg.demoMode) {
     app.use("/api", createDemoCollectorRouter());

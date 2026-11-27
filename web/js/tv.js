@@ -26,8 +26,7 @@
     { id: "timeline", label: "Timeline" },
     { id: "kpi", label: "KPI" },
     { id: "analytics", label: "Analytics" },
-    { id: "maintenance", label: "Maint" },
-    { id: "statistics", label: "Stats" },
+    { id: "fleet", label: "Fleet" },
   ];
 
   var DWELL_PRESETS = [
@@ -561,9 +560,15 @@
 
   // ------------------------------------------------------------------ playlist
 
+  function normalizeViewId(id) {
+    if (id === "maintenance" || id === "statistics") return "fleet";
+    return id;
+  }
+
   function isKnownView(id) {
+    var norm = normalizeViewId(id);
     for (var i = 0; i < ROTATION_VIEWS.length; i++) {
-      if (ROTATION_VIEWS[i].id === id) return true;
+      if (ROTATION_VIEWS[i].id === norm) return true;
     }
     return false;
   }
@@ -571,18 +576,20 @@
   function activePlaylistViews() {
     var list = [];
     (cfg.playlist || []).forEach(function (step) {
-      if (step && step.view && isKnownView(step.view) && list.indexOf(step.view) === -1) list.push(step.view);
+      var v = step && step.view ? normalizeViewId(step.view) : null;
+      if (v && isKnownView(v) && list.indexOf(v) === -1) list.push(v);
     });
     return list.length ? list : ["cards"];
   }
 
   function buildSteps() {
     var out = [];
+    var seenNonCard = Object.create(null);
     var fallbackDwell = parseSeconds(cfg.interval);
     if (fallbackDwell === null) fallbackDwell = 20000;
 
     (cfg.playlist || []).forEach(function (spec) {
-      var v = spec && spec.view;
+      var v = spec && spec.view ? normalizeViewId(spec.view) : null;
       if (!v || !isKnownView(v)) return;
       var dwell = parseSeconds(spec.dwell);
       if (dwell === null) dwell = fallbackDwell;
@@ -592,7 +599,8 @@
         for (var p = 0; p < pages; p++) {
           out.push({ view: "cards", page: p, dwell: dwell });
         }
-      } else {
+      } else if (!seenNonCard[v]) {
+        seenNonCard[v] = true;
         out.push({ view: v, dwell: dwell });
       }
     });
